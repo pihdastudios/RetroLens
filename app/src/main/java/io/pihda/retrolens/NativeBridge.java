@@ -5,7 +5,10 @@ import java.nio.ByteBuffer;
 
 /** Narrow JNI boundary. Pixels, UI, persistence, and recording remain native. */
 public final class NativeBridge {
-  public static final String BUILD_ID = "stability-20260722-a";
+  public static final String BUILD_ID = "safe-preview-20260722-b";
+  public static final boolean SAFE_BASELINE_ENABLED = true;
+  public static final boolean ANALYTICAL_PREVIEW_ENABLED = false;
+  public static final boolean NATIVE_OUTPUT_ENABLED = false;
   public static final boolean RETRO_CLIP_ENABLED = false;
   public static final boolean PROCESSED_DERIVATIVE_ENABLED = false;
 

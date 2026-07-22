@@ -19,17 +19,18 @@ Those results came from the source WaveSnap/PMCADemo baseline. They justify the 
 - A fully black display with working physical Sony shutter was observed from the earlier native build. New 5–6.6 MB Sony originals appeared on the card, confirming camera/shutter operation independently of the failed effect display.
 - No `RETROLENS/` directory was produced by that run, even though Java session logging precedes native and camera startup. The exact installed/selected package or early failure point therefore remains unresolved.
 - Stability build `stability-20260722-a`, final APK SHA-256 `f535468af3867b5139c0a6700b932fc3f1d0dc77c3d684ed0d6595cebb84d95c`, builds and verifies. An earlier stability iteration installed successfully; final-install and physical results are pending. It adds a synchronous surface probe and visible fallback, uses the real 80×60 reduced grid, renders on events, batches logs, shortens teardown bounds, and disables Retro Clip/processed derivatives.
+- Physical testing of `stability-20260722-a` still showed a pure black screen. The shutter worked inside RetroLens and the Movie button had no visible effect. After exiting, the next shutter press in Sony's normal camera application remained at `Writing memory` with the red media LED continuously active; battery removal was required. This is a severe lifecycle regression, so that build is retired from hardware testing.
+- The card had ample free space when inspected afterward. No `RETROLENS/` directory or log existed, so external app output did not fill the card and cannot explain the wedge.
+- Static review found two concrete risks in the retired build: it forced high display color depth despite the proven camera apps using low depth, and it released `CameraEx` even after reporting that the CameraSequence worker had failed to stop. Its opaque second SurfaceView could also cover both normal preview and Java fallback after a successful initial surface probe followed by a later render failure.
+- Safety build `safe-preview-20260722-b`, APK SHA-256 `c71655c7f71dff4c107954fc09c1478494f3cc61fd2528b79c74b0015cc14b63`, removes CameraSequence and native runtime activation, the second SurfaceView, processed outputs, video, external logging, and the external-storage permission. It built, verified, and installed successfully through Sony-PMCA-RE. Hardware results are pending and must follow the staged test below.
 - The latest PMCADemo log showed many consecutive Boot/Exit receiver messages while navigating the Sony application menu. PMCADemo and LegacyAlphaRemote receiver behavior is being audited separately and has not been changed.
 
 ## Open hardware checks
 
-1. Launch and confirm the native startup surface transitions into processed live view.
-2. Record actual 80×60 decode/filter/compose FPS, surface geometry/format, and dropped frames.
-3. Exercise touch, dial, directional, center, menu, C1, playback, autofocus, shutter, movie, and delete behavior.
-4. Confirm the Sony original plus preview derivative/sidecar.
-5. Record and host-validate a Retro Clip; interrupt a second clip during activity pause.
-6. Repeat entry/exit five times and check frame acquisition/release balance.
-7. Test low storage, malformed settings, lens removal, low battery, and unsupported CameraSequence behavior.
-8. Probe Sony private movie control only in a separate diagnostic build.
+1. Open and exit the safety build five times without capture. After every exit, take one photo in Sony's normal camera application and confirm writing completes normally.
+2. Take one photo inside RetroLens, wait for its media LED to stop, exit, then take one normal-camera photo and confirm writing completes normally.
+3. Verify visible normal preview, `SAFE PREVIEW` status, autofocus, still capture, disabled Movie message, Delete/back exit, and application-menu responsiveness.
+4. Only after both safety phases pass, test native output without CameraSequence in a separate build.
+5. Only after native output remains lifecycle-safe, reintroduce CameraSequence with strict worker quarantine and repeat the five-cycle exit test before filters.
 
 No item in this section may be promoted to “working on a5100” without `RETROLENS/LOG.TXT` evidence.

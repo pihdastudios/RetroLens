@@ -4,6 +4,7 @@ import android.os.Environment;
 import java.io.*;
 
 public class Logger {
+  public static final boolean EXTERNAL_LOGGING_ENABLED = false;
   private static final int MAX_BUFFER_CHARS = 32768;
   private static final StringBuffer pending = new StringBuffer();
 
@@ -26,10 +27,16 @@ public class Logger {
   }
 
   public static synchronized void startSession(String buildId) {
-    appendToFile("[INFO] RetroLens session start build=" + buildId + "\n");
+    log("INFO",
+        "RetroLens session start build=" + buildId
+            + " externalLogging=" + EXTERNAL_LOGGING_ENABLED);
   }
 
   public static synchronized void flush() {
+    if (!EXTERNAL_LOGGING_ENABLED) {
+      pending.setLength(0);
+      return;
+    }
     if (pending.length() == 0)
       return;
     if (appendToFile(pending.toString()))
@@ -56,6 +63,8 @@ public class Logger {
   }
 
   private static boolean appendToFile(String text) {
+    if (!EXTERNAL_LOGGING_ENABLED)
+      return true;
     try {
       getFile().getParentFile().mkdirs();
       BufferedWriter writer = new BufferedWriter(new FileWriter(getFile(), true));

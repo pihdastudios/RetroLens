@@ -35,8 +35,35 @@ grep -q 'RETRO_CLIP_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'PROCESSED_DERIVATIVE_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'SAFE_BASELINE_ENABLED = true' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'ANALYTICAL_PREVIEW_ENABLED = false' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'NATIVE_OUTPUT_ENABLED = false' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'EXTERNAL_LOGGING_ENABLED = false' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
+if grep -q 'retroLensSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"; then
+    echo "Safe baseline must contain only the Sony preview surface" >&2
+    exit 1
+fi
+if grep -q 'new CameraSequenceFrameSource' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
+    echo "Safe baseline must not start CameraSequence" >&2
+    exit 1
+fi
+if grep -q 'NativeBridge.load' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
+    echo "Safe baseline must not load the native runtime" >&2
+    exit 1
+fi
 if grep -q 'android.permission.INTERNET' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then
     echo "RetroLens must not request Internet permission" >&2
+    exit 1
+fi
+if grep -q 'android.permission.WRITE_EXTERNAL_STORAGE' \
+    "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then
+    echo "Safe baseline must not request external-storage write permission" >&2
     exit 1
 fi
 

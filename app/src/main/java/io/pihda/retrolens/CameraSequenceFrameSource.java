@@ -199,6 +199,11 @@ public final class CameraSequenceFrameSource {
       }
     } catch (Throwable throwable) {
       unavailable("CameraSequence initialization or polling failed", throwable);
+    } finally {
+      // The worker that opens the private Sony sequence also owns its final
+      // release. A future activity must still quarantine CameraEx if this
+      // worker cannot be joined, rather than releasing underneath polling.
+      release();
     }
     Logger.info("RetroFrames: worker stopped");
   }

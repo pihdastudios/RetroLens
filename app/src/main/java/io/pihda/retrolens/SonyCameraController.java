@@ -12,7 +12,6 @@ public final class SonyCameraController implements SurfaceHolder.Callback {
   public interface Listener {
     void onCameraReady(CameraEx cameraEx);
     void onCameraUnavailable(String reason);
-    void onCapturedJpeg(int byteCount, long timestampMs);
   }
 
   private final SurfaceHolder holder;
@@ -22,6 +21,7 @@ public final class SonyCameraController implements SurfaceHolder.Callback {
   private boolean active;
   private boolean surfaceReady;
   private boolean previewReady;
+  private boolean captureInProgress;
   private int captureGeneration;
 
   public SonyCameraController(SurfaceView surfaceView, Listener listener) {
@@ -29,27 +29,16 @@ public final class SonyCameraController implements SurfaceHolder.Callback {
     this.handler = new Handler();
     holder = surfaceView.getHolder();
     holder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
-    holder.addCallback(this);
   }
 
   public void start() {
     if (active)
       return;
     active = true;
+    captureInProgress = false;
+    holder.addCallback(this);
     try {
       cameraEx = CameraEx.open(0, null);
-      if (NativeBridge.PROCESSED_DERIVATIVE_ENABLED) {
-        cameraEx.setJpegListener(new CameraEx.JpegListener() {
-          @Override
-          public void onPictureTaken(byte[] data, CameraEx camera) {
-            if (!active)
-              return;
-            int bytes = data == null ? 0 : data.length;
-            Logger.info("Camera: captured JPEG callback bytes=" + bytes);
-            listener.onCapturedJpeg(bytes, android.os.SystemClock.elapsedRealtime());
-          }
-        });
-      }
       Logger.info("Camera: CameraEx.open completed");
       startPreviewIfReady();
     } catch (Throwable throwable) {
@@ -64,9 +53,12 @@ public final class SonyCameraController implements SurfaceHolder.Callback {
     active = false;
     captureGeneration++;
     handler.removeCallbacksAndMessages(null);
+    holder.removeCallback(this);
     CameraEx camera = cameraEx;
     cameraEx = null;
+    surfaceReady = false;
     previewReady = false;
+    captureInProgress = false;
     if (camera != null) {
       try {
         camera.getNormalCamera().cancelAutoFocus();
@@ -77,11 +69,6 @@ public final class SonyCameraController implements SurfaceHolder.Callback {
         camera.cancelTakePicture();
       } catch (Throwable t) {
         report("Cancel shutter during release failed", t);
-      }
-      try {
-        camera.setJpegListener(null);
-      } catch (Throwable t) {
-        report("Remove JPEG listener failed", t);
       }
       try {
         camera.release();
@@ -118,13 +105,16 @@ public final class SonyCameraController implements SurfaceHolder.Callback {
     final int generation = ++captureGeneration;
     try {
       camera.getNormalCamera().takePicture(null, null, null);
+      captureInProgress = true;
+      previewReady = false;
       Logger.info("Camera: capture requested generation=" + generation);
       handler.postDelayed(new Runnable() {
         @Override
         public void run() {
-          if (!active || generation != captureGeneration || cameraEx != camera)
+          if (!active || !captureInProgress || generation != captureGeneration
+              || cameraEx != camera)
             return;
-          releaseShutter();
+          releaseShutterForGeneration(generation);
         }
       }, 425L);
       return true;
@@ -135,12 +125,19 @@ public final class SonyCameraController implements SurfaceHolder.Callback {
   }
 
   public void releaseShutter() {
+    releaseShutterForGeneration(captureGeneration);
+  }
+
+  private void releaseShutterForGeneration(int generation) {
     CameraEx camera = cameraEx;
-    if (!active || camera == null)
+    if (!active || camera == null || !captureInProgress || generation != captureGeneration)
       return;
+    captureInProgress = false;
+    captureGeneration++;
     try {
       camera.cancelTakePicture();
       Logger.info("Camera: shutter released");
+      startPreviewIfReady();
     } catch (Throwable t) {
       report("Shutter release failed", t);
     }

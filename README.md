@@ -1,8 +1,8 @@
 # RetroLens
 
-RetroLens is a live retro-effects camera application for the Sony a5100 OpenMemories environment. It acquires Sony analytical-preview JPEGs with `CameraSequence`, decodes and processes them in native C++, composites a camera-oriented interface, and preserves normal Sony still capture.
+RetroLens is a retro-effects camera project for the Sony a5100 OpenMemories environment. Its effects engine remains implemented in native C++, while the current hardware-recovery build deliberately runs only Sony's normal preview and still-capture path.
 
-The current `stability-20260722-a` build intentionally disables Retro Clip and processed derivatives while the native display path is physically validated. Their implementation and host tests remain in the project, but the runtime does not start the recorder or request captured JPEG data.
+The current `safe-preview-20260722-b` build disables CameraSequence, native output, Retro Clip, processed derivatives, and external-card logging at runtime. It creates no analytical-preview or native worker and loads no native runtime. This isolates a previously observed camera-pipeline wedge before effects are reintroduced.
 
 The project never modifies firmware, calibration data, boot partitions, or Sony originals.
 
@@ -11,8 +11,9 @@ The project never modifies firmware, calibration data, boot partitions, or Sony 
 - Host native tests and the API-10 APK build pass.
 - The package has installed successfully through Sony-PMCA-RE on an ILCE-5100.
 - CameraSequence itself was previously measured on this same camera in the source baseline at roughly 9–10 analytical JPEG frames per second.
-- Stability APK SHA-256 `f535468af3867b5139c0a6700b932fc3f1d0dc77c3d684ed0d6595cebb84d95c` builds and verifies. Final-install and physical validation are tracked in `DEVICE_FINDINGS.md`.
-- The current RetroLens native surface and filters still require post-install physical operation and log review before they can be called hardware-tested.
+- The prior stability build produced an immediate black screen and left the next normal-camera capture stuck at `Writing memory`; battery removal was required. It must not be used for further testing.
+- Safety APK SHA-256 `c71655c7f71dff4c107954fc09c1478494f3cc61fd2528b79c74b0015cc14b63` builds, verifies, requests only camera permission, and installed successfully through Sony-PMCA-RE.
+- The safety baseline requires the two-phase physical exit/capture test in `DEVICE_FINDINGS.md` before its lifecycle can be called hardware-tested.
 - No screenshots have yet been captured from the physical camera.
 
 See `DEVICE_FINDINGS.md` for the exact evidence boundary.
@@ -20,22 +21,12 @@ See `DEVICE_FINDINGS.md` for the exact evidence boundary.
 ## Architecture
 
 ```text
-CameraEx + normal Sony preview
-CameraSequence worker -> one direct ByteBuffer -> bounded JNI copy
-                                             |
-                                             v
-                         native process/render thread
-                         PicoJPEG -> real 80x60 RGB sample grid
-                                      |              |
-                                      +-> fused preset graph
-                                      +-> event-driven 640x480 compositor
-                                           +-> native surface + UI
-                                           +-> Java-visible fallback on failure
+CameraEx -> one Sony-owned normal preview SurfaceView
+         -> autofocus and still capture
+Java View -> safe-build status and physical-key feedback
 ```
 
-Java owns the Activity, Sony API calls, surfaces, physical keys, touch forwarding, one CameraSequence worker, and deterministic teardown. C++ owns JPEG decoding/encoding, filtering, temporal history, UI scenes, settings, snapshots, frame pacing, logging, and recording.
-
-The Java frame callback never allocates a bitmap or processes pixels. It reuses one 256 KiB direct buffer. JNI copies into one native slot and drops a frame when that slot is busy. Native memory is allocated once at startup. Routine rendering happens only for a new camera frame or UI event rather than at an unrelated 30 FPS cadence.
+Java owns the active safety baseline and deterministic camera teardown. The dormant C++ engine still owns filters, bounded temporal state, persistence, MJPEG/AVI support, and native UI when those features are enabled in a later hardware-gated build.
 
 ## Toolchain
 
@@ -72,22 +63,17 @@ Installation requires the camera in a Sony-PMCA-RE compatible USB mode. `./scrip
 
 | Control | Action |
 | --- | --- |
-| Left/right or upper dial | Previous/next style |
-| Up/down or lower dial | Category navigation or intensity in quick controls |
-| Center | Open/close quick controls |
-| Menu | Style browser |
-| Playback | RetroLens gallery scene |
+| Navigation controls | Reserved while effects are disabled |
 | Half shutter | Sony autofocus |
-| Full shutter | Sony capture, then processed preview derivative |
-| Movie | Show Retro Clip disabled status in the stability build |
-| C1 | Hold original/effect compare |
+| Full shutter | Sony original capture |
+| Movie | Show `VIDEO DISABLED - SAFETY BUILD` |
 | Delete | Back/exit |
 
-Touch gestures: swipe horizontally for styles, tap the preview to hide/show controls, tap the center card for quick controls, drag across the quick-control panel to change intensity, double-tap to favorite, and long-press for comparison. Touch-to-focus is not enabled because no safe Sony API path has been proven.
+Effects touch gestures and touch-to-focus are disabled in the safety baseline.
 
 ## Interface
 
-The native renderer provides the startup wake, processed preview, status bar, three-card carousel, favorites, quick-control drawer, style browser, compare label, capture flash, recording state, gallery scene, and a polished compatibility card. Routine animation is short and is redrawn independently of analytical frame arrival.
+The safety interface is a transparent Java overlay above the sole Sony preview surface. It identifies the build, camera readiness, focus/capture feedback, and intentionally disabled video without hiding the live view.
 
 The UI exposes descriptive controls. Internally each preset has a stable ID, category, description, tier, control mask, tuned grade, and a graph assembled from bounded shared passes.
 
@@ -112,7 +98,7 @@ Thermal and infrared modes are simulated color mappings, not sensor measurements
 
 A full shutter press calls the verified Sony `takePicture(null,null,null)` path and releases it after the established guarded delay. The Sony original remains owned and saved by the camera.
 
-Processed derivative output is disabled in the stability build. The captured-JPEG listener is not registered, avoiding an additional multi-megabyte Java byte array after shutter. When the feature is re-enabled after validation, it will write a separate preview-resolution image and sidecar without modifying the Sony original:
+Processed derivative output is disabled in the safety build. The captured-JPEG listener is not registered, avoiding an additional multi-megabyte Java byte array after shutter. When the feature is re-enabled after validation, it will write a separate preview-resolution image and sidecar without modifying the Sony original:
 
 ```text
 RETROLENS/PHOTOS/<date>_<preset>_preview.jpg
@@ -125,7 +111,7 @@ This is explicitly a preview-resolution derivative. Full-resolution post-process
 
 ### Retro Clip
 
-Retro Clip is runtime-disabled in `stability-20260722-a`. Its bounded MJPEG/AVI implementation remains compiled and host-tested, but no recorder thread, recorder frame, or encode buffer is created and the movie key cannot start an output file.
+Retro Clip is runtime-disabled in `safe-preview-20260722-b`. Its bounded MJPEG/AVI implementation remains compiled and host-tested, but the native runtime is not loaded and the movie key cannot start an output file.
 
 Files are written to `.tmp`, finalized with `idx1`, patched, flushed, and atomically renamed. Activity interruption produces a finalized filename ending in `.incomplete` and an `interrupted: true` sidecar rather than pretending the clip is complete.
 
@@ -143,11 +129,13 @@ RetroLens makes no full-HD baked-filter, H.264, audio, or encoder/ISP intercepti
 
 ## Performance and memory
 
-The source CameraSequence ceiling is approximately 10 FPS. PicoJPEG reduced mode contains one real color sample for each source 8×8 block, so the processing core now works directly on the unique 80×60 grid instead of filtering a 4× duplicated 320×240 image. Display-space scanlines, masks, vignette, UI, and scaling remain at 640×480.
+The safety build performs no analytical JPEG decoding, filter processing, native composition, recording, or app-owned card I/O. Its active workload is the Sony normal preview plus a small Java status overlay.
 
 The performance controller monitors decode, filter, render, and dropped-frame measurements and controls accepted cadence. The renderer sleeps between new frames and UI animation deadlines. SIMD, handwritten assembly, OpenGL ES, and larger JPEG libraries remain deferred until device measurements prove the optimized integer path insufficient and confirm CPU capabilities.
 
 ## Storage and configuration
+
+External logging and all `RETROLENS/` writes are disabled in the safety build so card activity cannot contaminate lifecycle testing. The safety APK does not request external-storage write permission. The dormant engine retains this layout for later builds:
 
 ```text
 RETROLENS/
@@ -163,11 +151,11 @@ Settings are versioned and atomically replaced. Invalid values fall back to safe
 
 ## Troubleshooting
 
-- `PREVIEW FALLBACK`: the opaque effect surface has been removed so normal Sony preview and capture remain available. Record the visible `E` code and inspect `RETROLENS/LOG.TXT`.
-- No frames: verify the CameraSequence probe remains accepted at 640×480, format 256, one queued frame, and a 262144-byte JPEG maximum.
+- Pure black screen in the safety build: stop testing and report whether the `SAFE PREVIEW` header appeared; there is no second native surface to hide the Sony preview.
+- `Writing memory` persisting after exit: do not launch RetroLens again. Allow a normal power-off if possible and avoid removing the battery while the card LED is active unless the camera is irrecoverably wedged.
 - Build cannot find tools: run `./scripts/toolchain-info.sh`; this project expects the workspace `toolchain/` directory and JDK 8.
 - Install cannot find camera: set USB Connection to Mass Storage or leave it in app-install mode and run `./scripts/usb-status.sh`.
-- Analyze a collected log with `./scripts/analyze-log.sh <log>`.
+- The safety build deliberately produces no `RETROLENS/LOG.TXT`; validation uses its visible build/status text and observed capture/exit behavior.
 
 ## Dependencies, licenses, and unresolved questions
 
