@@ -50,6 +50,12 @@ grep -q 'NATIVE_OUTPUT_ENABLED = false' \
 grep -q 'EXTERNAL_LOGGING_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
 grep -q 'nativeProbeSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
+grep -q 'android:layout_width="240dp"' \
+    "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
+grep -q 'android:layout_height="180dp"' \
+    "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
+grep -q 'kDisplayProbeWidth = 240' "$PROJECT_DIR/app/src/main/jni/display_probe.h"
+grep -q 'kDisplayProbeHeight = 180' "$PROJECT_DIR/app/src/main/jni/display_probe.h"
 grep -q 'reduced_jpeg_decoder.cpp display_probe.cpp display_probe_worker.cpp display_probe_jni.cpp' \
     "$PROJECT_DIR/app/src/main/jni/Android.mk"
 if grep -q 'retroLensSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"; then
@@ -83,7 +89,13 @@ if grep -Eq 'nativeSubmitFrame|nativeCreate\(' \
 fi
 grep -q 'nativeSubmitDisplayProbeJpeg' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'nativeChangeDisplayProbeStyle' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'displayProbeController.submitJpeg' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'displayProbeController.changeStyle(-1)' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'displayProbeController.changeStyle(1)' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
 if grep -q 'NativeBridge.load' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
@@ -119,8 +131,12 @@ if grep -Eq 'malloc|new |fopen|mkdir|encodeJpeg|AviWriter' \
     echo "Filter panel worker must use fixed buffers and contain no storage or recorder path" >&2
     exit 1
 fi
-grep -q 'findPreset("olive_pocket")' \
-    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
+grep -q 'kFilterProbeStyleCount = 10' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.h"
+for style in olive_pocket cga_shock one_bit_desktop consumer_crt vhs_rental \
+    soviet_archive_1978 newsprint comic_ink piss_filter_2007 thermal_false_color; do
+    grep -q "\"$style\"" "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
+done
 if grep -q 'android.permission.INTERNET' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then
     echo "RetroLens must not request Internet permission" >&2
     exit 1

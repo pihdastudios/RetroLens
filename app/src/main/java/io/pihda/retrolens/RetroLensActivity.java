@@ -6,7 +6,7 @@ import android.os.Handler;
 import com.sony.scalar.hardware.CameraEx;
 import java.nio.ByteBuffer;
 
-/** Bounded Olive Pocket filter-panel probe with no storage or video path. */
+/** Bounded ten-style 4:3 panel probe with no storage or video path. */
 public final class RetroLensActivity extends BaseActivity
     implements SonyCameraController.Listener, NativeDisplayProbeController.Listener,
                CameraSequenceFrameSource.Listener, CameraSequenceFrameSource.FrameConsumer {
@@ -37,7 +37,7 @@ public final class RetroLensActivity extends BaseActivity
         (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this);
     mainHandler = new Handler();
     Logger.startSession(NativeBridge.BUILD_ID);
-    Logger.info("RetroLens: filter panel probe created model=" + Build.MODEL + " sdk="
+    Logger.info("RetroLens: style panel probe created model=" + Build.MODEL + " sdk="
         + Build.VERSION.SDK_INT + " abi=" + Build.CPU_ABI + " build=" + NativeBridge.BUILD_ID);
   }
 
@@ -55,12 +55,12 @@ public final class RetroLensActivity extends BaseActivity
     setAutoPowerOffMode(false);
     statusView.showStarting();
     cameraController.start();
-    Logger.info("RetroLens: filter panel probe resume complete");
+    Logger.info("RetroLens: style panel probe resume complete");
   }
 
   @Override
   protected void onPause() {
-    Logger.info("RetroLens: filter panel probe pause begin");
+    Logger.info("RetroLens: style panel probe pause begin");
     resumed = false;
     mainHandler.removeCallbacksAndMessages(null);
     readyCamera = null;
@@ -70,7 +70,7 @@ public final class RetroLensActivity extends BaseActivity
     displayProbeController.stop();
     if (sequenceStopped) {
       cameraController.stop();
-      Logger.info("RetroLens: filter panel probe pause release complete");
+      Logger.info("RetroLens: style panel probe pause release complete");
     } else {
       cameraQuarantined = true;
       Logger.error(
@@ -208,8 +208,42 @@ public final class RetroLensActivity extends BaseActivity
 
   @Override
   protected boolean onMovieKeyDown() {
-    statusView.showTransient("VIDEO DISABLED", "FILTER PANEL PROBE - PHOTO ONLY", 1400L);
-    Logger.info("RetroLens: movie key ignored in filter panel probe");
+    statusView.showTransient("VIDEO DISABLED", "STYLE PANEL PROBE - PHOTO ONLY", 1400L);
+    Logger.info("RetroLens: movie key ignored in style panel probe");
+    return true;
+  }
+
+  @Override
+  protected boolean onLeftKeyDown() {
+    displayProbeController.changeStyle(-1);
+    return true;
+  }
+
+  @Override
+  protected boolean onLeftKeyUp() {
+    return true;
+  }
+
+  @Override
+  protected boolean onRightKeyDown() {
+    displayProbeController.changeStyle(1);
+    return true;
+  }
+
+  @Override
+  protected boolean onRightKeyUp() {
+    return true;
+  }
+
+  @Override
+  protected boolean onUpperDialTurned(boolean clockwise, int value) {
+    displayProbeController.changeStyle(clockwise ? 1 : -1);
+    return true;
+  }
+
+  @Override
+  protected boolean onLowerDialTurned(boolean clockwise, int value) {
+    displayProbeController.changeStyle(clockwise ? 1 : -1);
     return true;
   }
 

@@ -15,6 +15,7 @@ enum FilterSubmitStatus {
 };
 
 static const int kFilterProbeInputCapacity = 256 * 1024;
+static const int kFilterProbeStyleCount = 10;
 
 class DisplayProbeWorker {
   public:
@@ -26,6 +27,7 @@ class DisplayProbeWorker {
     void updateSequenceMetrics(int state, int receivedFrames, int releasedFrames, int lastJpegBytes,
                                int64_t firstTimestampMs, int64_t lastTimestampMs);
     int submitJpeg(const unsigned char* jpeg, int length, int64_t timestampMs);
+    int changeStyle(int delta);
     bool blitLatest(void* destination, int width, int height, int stride, int format,
                     int* frameNumber);
     bool waitForFrame(int minimumFrame, int timeoutMs);
@@ -54,8 +56,12 @@ class DisplayProbeWorker {
     bool inputPending_;
     bool inputInUse_;
     bool hasPrevious_;
+    bool hasRaw_;
+    bool styleDirty_;
+    int selectedStyle_;
     int jpegLength_;
     int64_t jpegTimestampMs_;
+    int64_t lastDecodedTimestampMs_;
     int64_t firstProcessedTimestampMs_;
     int64_t lastProcessedTimestampMs_;
     unsigned char jpeg_[kFilterProbeInputCapacity];

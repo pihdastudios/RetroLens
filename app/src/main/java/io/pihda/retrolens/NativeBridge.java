@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 
 /** Narrow JNI boundary. Pixels, UI, persistence, and recording remain native. */
 public final class NativeBridge {
-  public static final String BUILD_ID = "filter-panel-probe-20260722-f";
+  public static final String BUILD_ID = "style-panel-probe-20260722-g";
   public static final boolean SAFE_BASELINE_ENABLED = false;
   public static final boolean DISPLAY_PROBE_ENABLED = true;
   public static final boolean DISPLAY_PROBE_THREAD_ENABLED = true;
@@ -77,6 +77,7 @@ public final class NativeBridge {
       long lastTimestampMs);
   public static native int nativeSubmitDisplayProbeJpeg(
       long handle, ByteBuffer jpeg, int length, long timestampMs);
+  public static native int nativeChangeDisplayProbeStyle(long handle, int delta);
   public static native void nativeClearDisplayProbe(long handle);
   public static native int nativeDestroyDisplayProbe(long handle, int[] stats);
 }

@@ -7,8 +7,8 @@
 
 namespace retrolens {
 
-static const int kDisplayProbeWidth = 256;
-static const int kDisplayProbeHeight = 144;
+static const int kDisplayProbeWidth = 240;
+static const int kDisplayProbeHeight = 180;
 
 enum SequenceProbeState {
     kSequenceOff = 0,
@@ -36,6 +36,8 @@ struct FilterProbeMetrics {
     int decodeMs;
     int filterMs;
     int processedFpsTenths;
+    int selectedPreset;
+    int styleChanges;
 };
 
 SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames,

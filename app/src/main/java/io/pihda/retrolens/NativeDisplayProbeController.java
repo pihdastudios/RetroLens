@@ -94,6 +94,11 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
     return NativeBridge.nativeSubmitDisplayProbeJpeg(probe, jpeg, length, timestampMs);
   }
 
+  public synchronized int changeStyle(int delta) {
+    long probe = handle;
+    return probe == 0L ? -1 : NativeBridge.nativeChangeDisplayProbeStyle(probe, delta);
+  }
+
   @Override
   public void surfaceCreated(SurfaceHolder surfaceHolder) {
     surfaceReady = true;

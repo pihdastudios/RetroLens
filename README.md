@@ -2,7 +2,7 @@
 
 RetroLens is a retro-effects camera project for the Sony a5100 OpenMemories environment. Its effects engine remains implemented in native C++, while the current staged probe limits work to Sony normal preview, still capture, and one small filtered analytical-preview panel.
 
-The current `filter-panel-probe-20260722-f` build enables CameraSequence only after the proven normal preview and native panel are ready. It reuses one Java direct buffer, synchronously copies accepted JPEGs into one fixed native slot, decodes a reduced 80×60 grid, applies the fixed Olive Pocket preset, and displays it inside the proven 256×144 panel. Full-screen output, Retro Clip, processed derivatives, settings writes, and all external-card output remain disabled.
+The current `style-panel-probe-20260722-g` build enables CameraSequence only after the proven normal preview and native panel are ready. It reuses one Java direct buffer, synchronously copies accepted JPEGs into one fixed native slot, decodes a reduced 80×60 grid, applies one of ten selected presets, and expands it exactly 3× into a 240×180 panel. Full-screen output, Retro Clip, processed derivatives, settings writes, and all external-card output remain disabled.
 
 The project never modifies firmware, calibration data, boot partitions, or Sony originals.
 
@@ -17,7 +17,8 @@ The project never modifies firmware, calibration data, boot partitions, or Sony 
 - Static native display probe APK SHA-256 `cb7b6cd9658395e6e1d5c7ea98d1225a7a1cdb16e92762bce4ea3c49be99d87f` displayed its pattern successfully and passed both lifecycle phases by user report. `DSC05032.JPG` is the only new file independently visible from that session, so the findings retain that evidence boundary.
 - Thread-probe APK SHA-256 `9bdaddbcea606cf74c0b14b7f4b5aa966a733f2f0f48f9ea9366a578649fc4bb` passes ASan/UBSan, ThreadSanitizer, API-10 build, and APK verification. The user confirmed its 8 FPS panel advanced from frame 10 to frame 26 with the rest of the camera behavior working; `DSC05033.JPG` independently confirms a new Sony original from that session.
 - Sequence-probe APK SHA-256 `000bc1d559b99c32768b598df19a469d4217ff76b5fdbdc03d6764e7ac8d3802` passes host tests, the legacy build, installation, and the complete physical gate. The user confirmed 30-second metrics, repeated exits, capture inside RetroLens, and normal-camera captures afterward without a persistent media LED or `Writing memory` wedge.
-- Filter-panel probe APK SHA-256 `ed67240f922358cda6ad848d1453e49d6bdedd9b58f53a4c9209cedb34541e04` passes host sanitizer tests, the legacy API-10/armeabi build, APK verification, and installation on the ILCE-5100. Physical filter/lifecycle results remain pending.
+- Filter-panel probe APK SHA-256 `ed67240f922358cda6ad848d1453e49d6bdedd9b58f53a4c9209cedb34541e04` passes host sanitizer tests, the legacy API-10/armeabi build, APK verification, and installation on the ILCE-5100. The user observed a moving Olive Pocket image; its 4:3 image occupied only 75% of the old 16:9 panel, which identified a presentation-geometry defect rather than a stalled decoder.
+- Style-panel probe APK SHA-256 `75945f5c7d256fd68ab2a2eaa28b7d452c8e539d61313592039e48045f952b7b` passes ASan/UBSan, ThreadSanitizer, the legacy API-10/armeabi build, APK verification, and physical installation on the ILCE-5100. Physical launch and lifecycle results are pending.
 - No screenshots have yet been captured from the physical camera.
 
 See `DEVICE_FINDINGS.md` for the exact evidence boundary.
@@ -27,7 +28,7 @@ See `DEVICE_FINDINGS.md` for the exact evidence boundary.
 ```text
 CameraEx -> one Sony-owned normal preview SurfaceView -> autofocus/still capture
          -> CameraSequence worker -> one direct JPEG buffer -> bounded native copy
-native worker -> reduced JPEG decode -> 80x60 Olive Pocket filter -> 256x144 panel
+native worker -> reduced JPEG decode -> selected 80x60 filter -> exact 3x -> 240x180 panel
 Java cadence -> synchronous native display post every 125 ms
 ```
 
@@ -68,17 +69,18 @@ Installation requires the camera in a Sony-PMCA-RE compatible USB mode. `./scrip
 
 | Control | Action |
 | --- | --- |
-| Navigation controls | Reserved while effects are disabled |
+| Left/right | Previous/next probe style |
+| Either dial | Previous/next probe style by direction |
 | Half shutter | Sony autofocus |
 | Full shutter | Sony original capture |
-| Movie | Show `VIDEO DISABLED - FILTER PANEL PROBE` |
+| Movie | Show `VIDEO DISABLED - STYLE PANEL PROBE` |
 | Delete | Back/exit |
 
-Filter selection, effects touch gestures, and touch-to-focus are disabled in this fixed-style probe.
+The style probe exposes Olive Pocket, CGA Shock, One-Bit Desktop, Consumer CRT, VHS Rental, Soviet Archive 1978, Newsprint, Comic Ink, Piss Filter 2007, and Thermal False Color. Effects touch gestures and touch-to-focus remain disabled.
 
 ## Interface
 
-The interface keeps the Sony preview full-screen and places a 256×144 native panel at the right center. Before the first frame it shows sequence diagnostics. After decode it shows a letterboxed Olive Pocket preview with compact processed-FPS, decode/filter-time, RX/release/outstanding, dropped-frame, and JPEG-size bands. `OUT` must remain 0 between frames or briefly reach 1.
+The interface keeps the Sony preview full-screen and places a 240×180 native panel at the right center. Before the first frame it shows sequence diagnostics. After decode, the complete 4:3 processed frame fills the panel with no letterbox; shadowed style and metric glyphs are drawn directly over the moving image. `OUT` must remain 0 between frames or briefly reach 1.
 
 The UI exposes descriptive controls. Internally each preset has a stable ID, category, description, tier, control mask, tuned grade, and a graph assembled from bounded shared passes.
 
@@ -116,7 +118,7 @@ This is explicitly a preview-resolution derivative. Full-resolution post-process
 
 ### Retro Clip
 
-Retro Clip is runtime-disabled in `filter-panel-probe-20260722-f`. Its implementation remains compiled and host-tested, but the full native runtime is not created and the movie key cannot start an output file.
+Retro Clip is runtime-disabled in `style-panel-probe-20260722-g`. Its implementation remains compiled and host-tested, but the full native runtime is not created and the movie key cannot start an output file.
 
 Files are written to `.tmp`, finalized with `idx1`, patched, flushed, and atomically renamed. Activity interruption produces a finalized filename ending in `.incomplete` and an `interrupted: true` sidecar rather than pretending the clip is complete.
 
@@ -134,7 +136,7 @@ RetroLens makes no full-HD baked-filter, H.264, audio, or encoder/ISP intercepti
 
 ## Performance and memory
 
-The filter-panel probe polls at a nominal 90 ms interval with at most one Sony frame requested. It validates markers, copies only when its single native slot is free, and immediately releases the Sony buffer. PicoJPEG reduced mode produces 80×60 unique samples; Olive Pocket runs at that resolution before the result is scaled into the small panel. There is no per-frame allocation or app-owned card I/O.
+The style-panel probe polls at a nominal 90 ms interval with at most one Sony frame requested. It validates markers, copies only when its single native slot is free, and immediately releases the Sony buffer. PicoJPEG reduced mode produces 80×60 unique samples; the selected style runs at that resolution before exact 3× nearest-neighbor expansion. A style change reprocesses the last raw frame, resets temporal history, and does not add another JPEG buffer. There is no per-frame allocation or app-owned card I/O.
 
 The performance controller monitors decode, filter, render, and dropped-frame measurements and controls accepted cadence. The renderer sleeps between new frames and UI animation deadlines. SIMD, handwritten assembly, OpenGL ES, and larger JPEG libraries remain deferred until device measurements prove the optimized integer path insufficient and confirm CPU capabilities.
 
@@ -157,11 +159,11 @@ Settings are versioned and atomically replaced. Invalid values fall back to safe
 ## Troubleshooting
 
 - A frozen panel with working Sony preview is a worker/cadence failure. A black or absent panel is a native post failure. Report the visible `E` code or last visible frame number.
-- A fully black screen is unexpected because the probe occupies only 256×144. Stop testing and reinstall the preserved safety APK.
+- A fully black screen is unexpected because the probe occupies only 240×180. Stop testing and reinstall the preserved safety APK.
 - `Writing memory` persisting after exit: do not launch RetroLens again. Allow a normal power-off if possible and avoid removing the battery while the card LED is active unless the camera is irrecoverably wedged.
 - Build cannot find tools: run `./scripts/toolchain-info.sh`; this project expects the workspace `toolchain/` directory and JDK 8.
 - Install cannot find camera: set USB Connection to Mass Storage or leave it in app-install mode and run `./scripts/usb-status.sh`.
-- The filter-panel probe deliberately produces no `RETROLENS/LOG.TXT`; validation uses visible counters and observed capture/exit behavior. `RX - REL` outside 0–1 is rendered as `BUFFER IMBALANCE`.
+- The style-panel probe deliberately produces no `RETROLENS/LOG.TXT`; validation uses visible counters and observed capture/exit behavior. `RX - REL` outside 0–1 is rendered as `BUFFER IMBALANCE`.
 
 ## Dependencies, licenses, and unresolved questions
 

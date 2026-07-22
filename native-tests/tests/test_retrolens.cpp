@@ -144,7 +144,8 @@ static unsigned long checksum16(const uint16_t* pixels, int count) {
 
 static void testDisplayProbeRaster() {
     SequenceProbeMetrics starting = calculateSequenceProbeMetrics(kSequenceStarting, 0, 0, 0, 0, 0);
-    FilterProbeMetrics filter = {false, false, 0, 0, 0, 0, 0, 0, 0};
+    FilterProbeMetrics filter;
+    memset(&filter, 0, sizeof(filter));
     uint16_t guarded[2 + 13 * 9 + 2];
     for (int index = 0; index < (int)(sizeof(guarded) / sizeof(guarded[0])); index++)
         guarded[index] = 0x55aa;
@@ -156,9 +157,9 @@ static void testDisplayProbeRaster() {
     uint16_t first[kDisplayProbeWidth * kDisplayProbeHeight];
     uint16_t second[kDisplayProbeWidth * kDisplayProbeHeight];
     assert(renderDisplayProbe(first, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 11, starting, 0, filter));
+                              240, 180, 4, 11, starting, 0, filter));
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 11, starting, 0, filter));
+                              240, 180, 4, 11, starting, 0, filter));
     assert(!memcmp(first, second, sizeof(first)));
     assert(checksum16(first, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
     assert(first[0] == probeRgb565(66, 232, 188));
@@ -166,7 +167,7 @@ static void testDisplayProbeRaster() {
     assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4, 0, starting, 0, filter));
 
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 12, starting, 0, filter));
+                              240, 180, 4, 12, starting, 0, filter));
     assert(memcmp(first, second, sizeof(first)) != 0);
 
     SequenceProbeMetrics active =
@@ -175,7 +176,7 @@ static void testDisplayProbeRaster() {
     assert(active.receivedFrames == 10 && active.releasedFrames == 9);
     assert(active.lastJpegBytes == 65536 && active.fpsTenths == 90);
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "sequence-probe",
-                              256, 144, 4, 11, active, 0, filter));
+                              240, 180, 4, 11, active, 0, filter));
     assert(memcmp(first, second, sizeof(first)) != 0);
 
     SequenceProbeMetrics malformed = calculateSequenceProbeMetrics(99, -1, -2, 999999, 2000, 1000);
@@ -194,9 +195,26 @@ static void testDisplayProbeRaster() {
     filter.processedFpsTenths = 84;
     filter.decodeMs = 6;
     filter.filterMs = 1;
-    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "filter-probe", 256,
-                              144, 4, 11, active, filtered, filter));
+    filter.selectedPreset = findPreset("olive_pocket");
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "filter-probe", 240,
+                              180, 4, 11, active, filtered, filter));
     assert(checksum16(second, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
+
+    const int sourceX = 40;
+    const int sourceY = 30;
+    const uint16_t expected = probeRgb565(filtered[sourceY * kFrameWidth + sourceX].r,
+                                          filtered[sourceY * kFrameWidth + sourceX].g,
+                                          filtered[sourceY * kFrameWidth + sourceX].b);
+    for (int y = sourceY * 3; y < sourceY * 3 + 3; y++)
+        for (int x = sourceX * 3; x < sourceX * 3 + 3; x++)
+            assert(second[y * kDisplayProbeWidth + x] == expected);
+    assert(second[90 * kDisplayProbeWidth] == probeRgb565(filtered[30 * kFrameWidth].r,
+                                                          filtered[30 * kFrameWidth].g,
+                                                          filtered[30 * kFrameWidth].b));
+    assert(second[90 * kDisplayProbeWidth + kDisplayProbeWidth - 1] ==
+           probeRgb565(filtered[30 * kFrameWidth + kFrameWidth - 1].r,
+                       filtered[30 * kFrameWidth + kFrameWidth - 1].g,
+                       filtered[30 * kFrameWidth + kFrameWidth - 1].b));
 }
 
 static void testDisplayProbeWorkerLifecycle() {
@@ -287,6 +305,17 @@ static void testReducedDecodeAndBoundedWorker() {
     assert(metrics.droppedFrames == dropped);
     assert(metrics.processedFrames >= 1 && metrics.processedFrames <= metrics.acceptedFrames);
     assert(metrics.decodeFailures == 0);
+    const char* expectedStyles[kFilterProbeStyleCount] = {
+        "olive_pocket",     "cga_shock",           "one_bit_desktop", "consumer_crt",
+        "vhs_rental",       "soviet_archive_1978", "newsprint",       "comic_ink",
+        "piss_filter_2007", "thermal_false_color"};
+    assert(metrics.selectedPreset == findPreset(expectedStyles[0]));
+    for (int index = 1; index < kFilterProbeStyleCount; index++)
+        assert(worker.changeStyle(1) == findPreset(expectedStyles[index]));
+    assert(worker.changeStyle(1) == findPreset(expectedStyles[0]));
+    assert(worker.changeStyle(-1) == findPreset(expectedStyles[kFilterProbeStyleCount - 1]));
+    worker.getFilterStats(&metrics);
+    assert(metrics.styleChanges == kFilterProbeStyleCount + 1);
     assert(worker.stop() <= 250);
     assert(worker.submitJpeg(encoded, (int)size, 5000) == kFilterSubmitInvalid);
     delete[] encoded;

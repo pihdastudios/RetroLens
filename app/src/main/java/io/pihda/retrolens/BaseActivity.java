@@ -72,11 +72,13 @@ public class BaseActivity extends Activity implements DisplayManager.Listener {
       case ScalarInput.ISV_KEY_LENS_ATTACH:
         return onLensAttached();
       case ScalarInput.ISV_DIAL_1_CLOCKWISE:
+        return onUpperDialTurned(true, getDialStatus(ScalarInput.ISV_DIAL_1_STATUS) / 22);
       case ScalarInput.ISV_DIAL_1_COUNTERCW:
-        return onUpperDialChanged(getDialStatus(ScalarInput.ISV_DIAL_1_STATUS) / 22);
+        return onUpperDialTurned(false, getDialStatus(ScalarInput.ISV_DIAL_1_STATUS) / 22);
       case ScalarInput.ISV_DIAL_2_CLOCKWISE:
+        return onLowerDialTurned(true, getDialStatus(ScalarInput.ISV_DIAL_2_STATUS) / 22);
       case ScalarInput.ISV_DIAL_2_COUNTERCW:
-        return onLowerDialChanged(getDialStatus(ScalarInput.ISV_DIAL_2_STATUS) / 22);
+        return onLowerDialTurned(false, getDialStatus(ScalarInput.ISV_DIAL_2_STATUS) / 22);
       case ScalarInput.ISV_KEY_MODE_DIAL:
         return onModeDialChanged(getDialStatus(ScalarInput.ISV_KEY_MODE_DIAL));
       default:
@@ -225,8 +227,14 @@ public class BaseActivity extends Activity implements DisplayManager.Listener {
   protected boolean onUpperDialChanged(int value) {
     return false;
   }
+  protected boolean onUpperDialTurned(boolean clockwise, int value) {
+    return onUpperDialChanged(value);
+  }
   protected boolean onLowerDialChanged(int value) {
     return false;
+  }
+  protected boolean onLowerDialTurned(boolean clockwise, int value) {
+    return onLowerDialChanged(value);
   }
   protected boolean onModeDialChanged(int value) {
     return false;

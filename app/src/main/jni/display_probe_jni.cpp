@@ -108,6 +108,13 @@ extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativeSub
     return probe->worker.submitJpeg(static_cast<const unsigned char*>(bytes), length, timestampMs);
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_io_pihda_retrolens_NativeBridge_nativeChangeDisplayProbeStyle(JNIEnv*, jclass, jlong handle,
+                                                                   jint delta) {
+    DisplayProbe* probe = from(handle);
+    return probe ? probe->worker.changeStyle(delta) : -1;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_io_pihda_retrolens_NativeBridge_nativeClearDisplayProbe(JNIEnv*, jclass, jlong handle) {
     (void)from(handle);

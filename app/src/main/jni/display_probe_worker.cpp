@@ -25,12 +25,26 @@ static void deadlineFromNow(struct timespec* deadline, int milliseconds) {
     }
 }
 
+static const char* kFilterStyleIds[kFilterProbeStyleCount] = {
+    "olive_pocket",     "cga_shock",           "one_bit_desktop", "consumer_crt",
+    "vhs_rental",       "soviet_archive_1978", "newsprint",       "comic_ink",
+    "piss_filter_2007", "thermal_false_color"};
+
+static int filterPresetIndex(int styleIndex) {
+    if (styleIndex < 0)
+        styleIndex = 0;
+    if (styleIndex >= kFilterProbeStyleCount)
+        styleIndex = kFilterProbeStyleCount - 1;
+    return findPreset(kFilterStyleIds[styleIndex]);
+}
+
 } // namespace
 
 DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs)
     : running_(false), threadStarted_(false), intervalMs_(intervalMs), frameCount_(0),
       postCount_(0), surfaceWidth_(0), surfaceHeight_(0), surfaceFormat_(0), inputPending_(false),
-      inputInUse_(false), hasPrevious_(false), jpegLength_(0), jpegTimestampMs_(0),
+      inputInUse_(false), hasPrevious_(false), hasRaw_(false), styleDirty_(false),
+      selectedStyle_(0), jpegLength_(0), jpegTimestampMs_(0), lastDecodedTimestampMs_(0),
       firstProcessedTimestampMs_(0), lastProcessedTimestampMs_(0) {
     if (intervalMs_ < 16)
         intervalMs_ = 16;
@@ -42,6 +56,7 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs)
     pthread_cond_init(&condition_, 0);
     sequenceMetrics_ = calculateSequenceProbeMetrics(kSequenceOff, 0, 0, 0, 0, 0);
     memset(&filterMetrics_, 0, sizeof(filterMetrics_));
+    filterMetrics_.selectedPreset = filterPresetIndex(selectedStyle_);
     memset(raw_, 0, sizeof(raw_));
     memset(filtered_, 0, sizeof(filtered_));
     memset(previous_, 0, sizeof(previous_));
@@ -130,6 +145,22 @@ int DisplayProbeWorker::submitJpeg(const unsigned char* jpeg, int length, int64_
     return kFilterSubmitAccepted;
 }
 
+int DisplayProbeWorker::changeStyle(int delta) {
+    pthread_mutex_lock(&mutex_);
+    if (delta) {
+        selectedStyle_ = (selectedStyle_ + delta) % kFilterProbeStyleCount;
+        if (selectedStyle_ < 0)
+            selectedStyle_ += kFilterProbeStyleCount;
+        filterMetrics_.selectedPreset = filterPresetIndex(selectedStyle_);
+        filterMetrics_.styleChanges++;
+        styleDirty_ = hasRaw_;
+        pthread_cond_broadcast(&condition_);
+    }
+    int presetIndex = filterMetrics_.selectedPreset;
+    pthread_mutex_unlock(&mutex_);
+    return presetIndex;
+}
+
 bool DisplayProbeWorker::blitLatest(void* destination, int width, int height, int stride,
                                     int format, int* frameNumber) {
     pthread_mutex_lock(&mutex_);
@@ -200,16 +231,20 @@ void DisplayProbeWorker::run() {
             inputInUse_ = true;
             int length = jpegLength_;
             int64_t timestampMs = jpegTimestampMs_;
+            int presetIndex = filterMetrics_.selectedPreset;
+            bool usePrevious = hasPrevious_ && !styleDirty_;
+            if (styleDirty_) {
+                hasPrevious_ = false;
+                styleDirty_ = false;
+            }
             pthread_mutex_unlock(&mutex_);
 
             int64_t decodeStartMs = monotonicMs();
             bool decoded = decodeReducedJpeg(jpeg_, (size_t)length, raw_);
             int64_t filterStartMs = monotonicMs();
-            if (decoded) {
-                const Preset& olivePocket = presetAt(findPreset("olive_pocket"));
-                processFrame(raw_, filtered_, 0, hasPrevious_ ? previous_ : 0, kFrameWidth,
-                             kFrameHeight, olivePocket, 100, 0x4f4c4956U, timestampMs);
-            }
+            if (decoded)
+                processFrame(raw_, filtered_, 0, usePrevious ? previous_ : 0, kFrameWidth,
+                             kFrameHeight, presetAt(presetIndex), 100, 0x52455452U, timestampMs);
             int64_t completedMs = monotonicMs();
 
             pthread_mutex_lock(&mutex_);
@@ -218,6 +253,8 @@ void DisplayProbeWorker::run() {
             if (decoded) {
                 memcpy(previous_, filtered_, sizeof(previous_));
                 hasPrevious_ = true;
+                hasRaw_ = true;
+                lastDecodedTimestampMs_ = timestampMs;
                 filterMetrics_.hasFrame = true;
                 filterMetrics_.decodeError = false;
                 filterMetrics_.processedFrames++;
@@ -236,6 +273,21 @@ void DisplayProbeWorker::run() {
                 filterMetrics_.decodeFailures++;
             }
             inputInUse_ = false;
+        } else if (styleDirty_ && hasRaw_) {
+            styleDirty_ = false;
+            hasPrevious_ = false;
+            int presetIndex = filterMetrics_.selectedPreset;
+            int64_t timestampMs = lastDecodedTimestampMs_;
+            pthread_mutex_unlock(&mutex_);
+            int64_t filterStartMs = monotonicMs();
+            processFrame(raw_, filtered_, 0, 0, kFrameWidth, kFrameHeight, presetAt(presetIndex),
+                         100, 0x52455452U, timestampMs);
+            int64_t completedMs = monotonicMs();
+            pthread_mutex_lock(&mutex_);
+            memcpy(previous_, filtered_, sizeof(previous_));
+            hasPrevious_ = true;
+            filterMetrics_.filterMs = (int)(completedMs - filterStartMs);
+            filterMetrics_.hasFrame = true;
         }
         renderNextLocked();
         pthread_cond_broadcast(&condition_);
