@@ -403,7 +403,7 @@ static void testReducedDecodeAndBoundedWorker() {
     assert(metrics.galleryPhotoCount == 1);
     assert(metrics.galleryHasThumbnail && metrics.galleryIndex == 0);
     PhotoStore photoStore(photoRoot, "HOST", "test");
-    assert(photoStore.initialize() && photoStore.photoCount() == 1);
+    assert(photoStore.initialize() == kPhotoStorageReady && photoStore.photoCount() == 1);
     Pixel savedThumbnail[kFrameWidth * kFrameHeight];
     assert(photoStore.loadThumbnail(0, savedThumbnail));
     const Pixel& savedCenter = savedThumbnail[30 * kFrameWidth + 40];
@@ -434,6 +434,16 @@ static void testReducedDecodeAndBoundedWorker() {
     snprintf(cleanup, sizeof(cleanup), "%s/RETROLENS", photoRoot);
     rmdir(cleanup);
     rmdir(photoRoot);
+
+    DisplayProbeWorker unavailableWorker("host-storage-failure", 8, "", "HOST", "test");
+    assert(unavailableWorker.start());
+    assert(unavailableWorker.submitJpeg(encoded, (int)size, 7000) == kFilterSubmitAccepted);
+    assert(unavailableWorker.waitForProcessedFrame(1, 1000));
+    assert(unavailableWorker.requestPhoto(7123) == kPhotoRequestUnavailable);
+    unavailableWorker.getFilterStats(&metrics);
+    assert(metrics.photoStorageState == kPhotoStorageInvalidRoot);
+    assert(metrics.photoSavedCount == 0 && metrics.photoFailedCount == 0);
+    assert(unavailableWorker.stop() <= 250);
     delete[] encoded;
 }
 
@@ -556,7 +566,7 @@ static void testPhotoStoreAndSettings() {
     char root[] = "/tmp/retrolens-photo-test-XXXXXX";
     assert(mkdtemp(root));
     PhotoStore store(root, "HOST CAMERA", "test-version");
-    assert(store.initialize());
+    assert(store.initialize() == kPhotoStorageReady);
 
     RuntimeSettings settings;
     memset(&settings, 0, sizeof(settings));
@@ -605,13 +615,46 @@ static void testPhotoStoreAndSettings() {
     assert(store.loadThumbnail(0, thumbnail));
     assert(!memcmp(frame, thumbnail, sizeof(frame)));
 
+    char path[800];
+    snprintf(path, sizeof(path), "%s/RETROLENS/CONFIG/stale.tmp", root);
+    FILE* stale = fopen(path, "wb");
+    assert(stale && fputs("stale", stale) >= 0);
+    fclose(stale);
+    snprintf(path, sizeof(path), "%s/RETROLENS/PHOTOS/stale.tmp", root);
+    stale = fopen(path, "wb");
+    assert(stale && fputs("stale", stale) >= 0);
+    fclose(stale);
+    snprintf(path, sizeof(path), "%s/RETROLENS/THUMBNAILS/stale.tmp", root);
+    stale = fopen(path, "wb");
+    assert(stale && fputs("stale", stale) >= 0);
+    fclose(stale);
+    snprintf(path, sizeof(path), "%s/RETROLENS/THUMBNAILS/index.txt", root);
+    assert(unlink(path) == 0);
     PhotoStore reloaded(root, "HOST CAMERA", "test-version");
-    assert(reloaded.initialize() && reloaded.photoCount() == 1);
-    assert(reloaded.deletePhoto(0) && reloaded.photoCount() == 0);
+    assert(reloaded.initialize() == kPhotoStorageReady && reloaded.photoCount() == 1);
+    snprintf(path, sizeof(path), "%s/RETROLENS/CONFIG/stale.tmp", root);
+    assert(access(path, F_OK) != 0);
+    snprintf(path, sizeof(path), "%s/RETROLENS/PHOTOS/stale.tmp", root);
+    assert(access(path, F_OK) != 0);
+    snprintf(path, sizeof(path), "%s/RETROLENS/THUMBNAILS/stale.tmp", root);
+    assert(access(path, F_OK) != 0);
+
+    snprintf(path, sizeof(path), "%s/RETROLENS/THUMBNAILS/index.txt", root);
+    FILE* corrupt = fopen(path, "wb");
+    assert(corrupt && fputs("not an index\n", corrupt) >= 0);
+    fclose(corrupt);
+    snprintf(path, sizeof(path), "%s/RETROLENS/PHOTOS/orphan_preview.jpg", root);
+    FILE* orphan = fopen(path, "wb");
+    assert(orphan && fputs("orphan", orphan) >= 0);
+    fclose(orphan);
+    PhotoStore recovered(root, "HOST CAMERA", "test-version");
+    assert(recovered.initialize() == kPhotoStorageReady && recovered.photoCount() == 1);
+    assert(recovered.deletePhoto(0) && recovered.photoCount() == 0);
+    snprintf(path, sizeof(path), "%s/RETROLENS/PHOTOS/orphan_preview.jpg", root);
+    unlink(path);
     delete[] encoded;
     delete[] scaled;
 
-    char path[800];
     snprintf(path, sizeof(path), "%s/RETROLENS/CONFIG/settings.cfg", root);
     unlink(path);
     snprintf(path, sizeof(path), "%s/RETROLENS/THUMBNAILS/index.txt", root);
@@ -625,6 +668,15 @@ static void testPhotoStoreAndSettings() {
     snprintf(path, sizeof(path), "%s/RETROLENS", root);
     rmdir(path);
     rmdir(root);
+}
+
+static void testPhotoStorageFailureStates() {
+    PhotoStore missing("", "HOST", "test");
+    assert(missing.initialize() == kPhotoStorageInvalidRoot);
+    assert(missing.photoCount() == 0);
+    PhotoStore unwritable("/proc/retrolens-host-test", "HOST", "test");
+    assert(unwritable.initialize() == kPhotoStorageDirectoryFailed);
+    assert(unwritable.photoCount() == 0);
 }
 
 int main() {
@@ -641,6 +693,7 @@ int main() {
     testAviBoundsAndAbort();
     testMalformedJpegRejection();
     testPhotoStoreAndSettings();
+    testPhotoStorageFailureStates();
     printf("RetroLens native tests passed: presets=%d\n", presetCount());
     return 0;
 }

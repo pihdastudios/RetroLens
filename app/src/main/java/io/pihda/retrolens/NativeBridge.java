@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 
 /** Narrow photo-only JNI boundary. Pixels, UI, and persistence remain native. */
 public final class NativeBridge {
-  public static final String BUILD_ID = "fullscreen-photo-20260722-i";
+  public static final String BUILD_ID = "storage-repair-20260722-j";
   public static final boolean SAFE_BASELINE_ENABLED = false;
   public static final boolean DISPLAY_PROBE_ENABLED = true;
   public static final boolean DISPLAY_PROBE_THREAD_ENABLED = true;

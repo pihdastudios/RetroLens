@@ -254,7 +254,7 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
         else if (filter.photoStatus == 7)
             photoMessage = "PHOTO ONLY - VIDEO OFF";
         else if (filter.photoStatus == 8)
-            photoMessage = "RETRO PHOTO UNAVAILABLE";
+            photoMessage = "SONY SAVED RETRO STORAGE OFF";
         if (photoMessage && !galleryScene) {
             rectangle(pixels, width, height, 30, 78, 210, 94, background);
             text(pixels, width, height, 35, 82, photoMessage,

@@ -51,6 +51,15 @@ grep -q 'NATIVE_OUTPUT_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'EXTERNAL_LOGGING_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
+grep -q 'StorageController.probe' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'getFD().sync()' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StorageController.java"
+grep -q 'storageRoot, Build.MODEL' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"
+grep -q 'kPhotoStorageIndexFailed' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
+grep -q 'cleanTemporaryFiles' "$PROJECT_DIR/app/src/main/jni/photo_store.cpp"
+grep -q 'rebuildIndex' "$PROJECT_DIR/app/src/main/jni/photo_store.cpp"
 grep -q 'nativeProbeSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
 native_surface_block="$(sed -n '/android:id="@+id\/nativeProbeSurface"/,/\/>/p' \
     "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml")"

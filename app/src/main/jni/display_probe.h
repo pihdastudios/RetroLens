@@ -64,6 +64,10 @@ struct FilterProbeMetrics {
     int galleryIndex;
     int galleryPreset;
     bool galleryHasThumbnail;
+    int photoStorageState;
+    int photoWriteStage;
+    int photoWriteError;
+    int photoFreeMiB;
 };
 
 SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames,

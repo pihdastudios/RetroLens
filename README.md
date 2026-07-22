@@ -94,11 +94,15 @@ RETROLENS/THUMBNAILS/<timestamp>_<preset>_preview.rgb
 
 The derivative is explicitly preview-resolution at 320x240. Its sidecar records preset, master intensity, per-preset adjustments, camera model, app version, source timestamp, and that the Sony original was preserved but its path is unknown. Scanline, mask, and vignette texture are included in the saved derivative. JPEG, sidecar, thumbnail, settings, and index files use temporary files, flush/sync, and atomic rename; partial save failure removes the transaction's preceding files.
 
+At startup Java canonicalizes the camera-reported external-storage root, creates the complete output tree, checks available space, and proves write/sync/rename behavior before passing that exact root to native code. The logger uses the same verified root. Native diagnostics distinguish invalid root, directory creation, low-space, and index failures; Sony capture remains available when derivative storage is unavailable and the UI does not report a RetroLens save until the full transaction completes.
+
 Full-resolution post-processing remains disabled until safe discovery of the newly captured Sony JPEG and a memory-bounded tile path are physically proven.
 
 ## Gallery and storage
 
 The gallery indexes at most 48 RetroLens-produced photos and loads one fixed 80x60 processed thumbnail at a time. The newest completed save is placed into the gallery slot immediately after the durable transaction, and Playback displays the selected processed image full-screen with its preset and `PROCESSED 320X240` label. It does not scan the full card or register files with Sony's private playback database. Delete requires confirmation and removes only the selected derivative, its sidecar, and its app thumbnail.
+
+Startup removes bounded stale `.tmp` transaction files. If the gallery index is missing, malformed, or points at incomplete entries, it is rebuilt from at most 512 inspected photo names while retaining at most the newest 48 complete JPEG/JSON/thumbnail sets. Orphan and incomplete files are never presented as successful gallery entries.
 
 ```text
 RETROLENS/
@@ -121,7 +125,7 @@ PicoJPEG reduced decode produces an 80x60 working image, chosen to fit the a5100
 - The earlier small-panel behavior is physically observed. The fullscreen candidate is a new uninstalled build and must not be described as device-proven until its locked-buffer dimensions and complete screen coverage are observed on-camera.
 - A frozen moving area with a working Sony preview indicates a decode/cadence issue. Fn opens rate-limited diagnostics.
 - If `Writing memory` persists after exit, stop testing this candidate and reinstall `releases/RetroLens-1.0.0-safe-preview.apk`; avoid battery removal while the card LED is active unless the camera is irrecoverably wedged.
-- If derivative saving fails, confirm free card space and inspect `RETROLENS/LOG.TXT`. The Sony original should still exist independently.
+- If derivative saving fails, confirm free card space and inspect `RETROLENS/LOG.TXT`. A healthy startup records `Storage: status=1`, the canonical root, free bytes, and `PhotoRuntime: storage ready`. The Sony original should still exist independently.
 - Use `./scripts/toolchain-info.sh` for missing tools and `./scripts/usb-status.sh` for installation connectivity.
 
 Unresolved Sony questions are full-resolution captured-JPEG discovery, safe full-screen processed output, exact format-256 semantics beyond observed JPEG markers, and private movie control. Video is outside this build and no filtered-video, audio, HD, encoder, or ISP claim is made.

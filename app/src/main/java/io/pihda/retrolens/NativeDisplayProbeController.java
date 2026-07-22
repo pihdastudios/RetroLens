@@ -2,7 +2,6 @@ package io.pihda.retrolens;
 
 import android.graphics.PixelFormat;
 import android.os.Build;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.view.MotionEvent;
@@ -31,7 +30,8 @@ public final class NativeDisplayProbeController
   private final Listener listener;
   private final Handler handler = new Handler();
   private final int[] finalStats = new int[3];
-  private final int[] runtimeStats = new int[8];
+  private final int[] runtimeStats = new int[12];
+  private final String storageRoot;
   private final Runnable animationTick = new Runnable() {
     @Override
     public void run() {
@@ -47,10 +47,13 @@ public final class NativeDisplayProbeController
   private boolean firstPostReported;
   private int reportedPhotoSaves;
   private int reportedPhotoFailures;
+  private int reportedStorageState = -1;
 
-  public NativeDisplayProbeController(SurfaceView view, Listener listener) {
+  public NativeDisplayProbeController(
+      SurfaceView view, Listener listener, StorageController.Result storage) {
     this.surfaceView = view;
     this.listener = listener;
+    storageRoot = storage != null && storage.isReady() ? storage.root : "";
     holder = view.getHolder();
     holder.setFormat(PixelFormat.RGB_565);
     view.setZOrderMediaOverlay(true);
@@ -63,14 +66,15 @@ public final class NativeDisplayProbeController
     firstPostReported = false;
     reportedPhotoSaves = 0;
     reportedPhotoFailures = 0;
+    reportedStorageState = -1;
     surfaceView.setVisibility(View.VISIBLE);
     surfaceView.setOnTouchListener(this);
     if (!NativeBridge.load()) {
       fail(NativeBridge.SURFACE_NO_WINDOW);
       return;
     }
-    handle = NativeBridge.nativeCreateDisplayProbe(NativeBridge.BUILD_ID, FRAME_INTERVAL_MS,
-        Environment.getExternalStorageDirectory().getAbsolutePath(), Build.MODEL, "1.0.0");
+    handle = NativeBridge.nativeCreateDisplayProbe(
+        NativeBridge.BUILD_ID, FRAME_INTERVAL_MS, storageRoot, Build.MODEL, "1.0.0");
     if (handle == 0L) {
       fail(NativeBridge.SURFACE_NO_WINDOW);
       return;
@@ -198,6 +202,14 @@ public final class NativeDisplayProbeController
     if (runtimeStats[2] != reportedPhotoFailures) {
       reportedPhotoFailures = runtimeStats[2];
       Logger.error("PhotoRuntime: processed derivative failure count=" + runtimeStats[2]);
+    }
+    if (runtimeStats[8] != reportedStorageState) {
+      reportedStorageState = runtimeStats[8];
+      if (runtimeStats[8] == 1)
+        Logger.info("PhotoRuntime: storage ready freeMiB=" + runtimeStats[11]);
+      else
+        Logger.error("PhotoRuntime: storage unavailable state=" + runtimeStats[8] + " stage="
+            + runtimeStats[9] + " errno=" + runtimeStats[10] + " freeMiB=" + runtimeStats[11]);
     }
     return true;
   }

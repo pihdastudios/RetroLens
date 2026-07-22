@@ -14,7 +14,7 @@ fi
 apk="$(latest_apk)"
 release_dir="$PROJECT_DIR/releases"
 mkdir -p "$release_dir"
-cp "$apk" "$release_dir/RetroLens-1.0.0-fullscreen-photo.apk"
-sha256sum "$release_dir/RetroLens-1.0.0-fullscreen-photo.apk" > \
-    "$release_dir/RetroLens-1.0.0-fullscreen-photo.apk.sha256"
-echo "Release package: $release_dir/RetroLens-1.0.0-fullscreen-photo.apk"
+cp "$apk" "$release_dir/RetroLens-1.0.0-storage-repair.apk"
+sha256sum "$release_dir/RetroLens-1.0.0-storage-repair.apk" > \
+    "$release_dir/RetroLens-1.0.0-storage-repair.apk.sha256"
+echo "Release package: $release_dir/RetroLens-1.0.0-storage-repair.apk"

@@ -109,7 +109,7 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
     sequenceMetrics_ = calculateSequenceProbeMetrics(kSequenceOff, 0, 0, 0, 0, 0);
     memset(&filterMetrics_, 0, sizeof(filterMetrics_));
     RuntimeSettings settings;
-    storageReady_ = photoStore_.initialize();
+    storageReady_ = photoStore_.initialize() == kPhotoStorageReady;
     if (storageReady_ && photoStore_.loadSettings(&settings)) {
         selectedStyle_ = settings.selectedPreset;
         intensity_ = settings.intensity;
@@ -129,6 +129,11 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
     filterMetrics_.controlsVisible = controlsVisible_;
     filterMetrics_.diagnostics = diagnostics_;
     filterMetrics_.favorite = isFavoriteLocked(selectedStyle_);
+    filterMetrics_.photoStorageState = photoStore_.storageState();
+    filterMetrics_.photoWriteStage = photoStore_.writeStage();
+    filterMetrics_.photoWriteError = photoStore_.lastError();
+    int64_t freeBytes = photoStore_.freeBytes();
+    filterMetrics_.photoFreeMiB = freeBytes < 0 ? -1 : (int)(freeBytes / (1024 * 1024));
     galleryPhotoCount_ = photoStore_.photoCount();
     filterMetrics_.galleryPhotoCount = galleryPhotoCount_;
     memset(raw_, 0, sizeof(raw_));
@@ -173,6 +178,7 @@ bool DisplayProbeWorker::start() {
             photoRunning_ = false;
             pthread_mutex_unlock(&photoMutex_);
             storageReady_ = false;
+            filterMetrics_.photoStorageState = kPhotoStorageDirectoryFailed;
         }
     }
     return true;
@@ -552,7 +558,7 @@ void DisplayProbeWorker::photoRun() {
         int encodedBytes = 0;
         PhotoEntry entry;
         memset(&entry, 0, sizeof(entry));
-        if (job == kPhotoJobSave && photoStore_.freeBytes() >= (int64_t)64 * 1024 * 1024) {
+        if (job == kPhotoJobSave) {
             ok = photoStore_.savePhoto(photoFrame_, presetIndex, intensity, photoAdjustments,
                                        favorite, timestampMs, scaledPhoto_, encodedPhoto_,
                                        sizeof(encodedPhoto_), &encodedBytes);
@@ -571,6 +577,7 @@ void DisplayProbeWorker::photoRun() {
 
         pthread_mutex_lock(&mutex_);
         if (job == kPhotoJobSave) {
+            storageReady_ = photoStore_.storageState() == kPhotoStorageReady;
             if (ok) {
                 photoStatus_ = kPhotoWriteSaved;
                 photoSavedCount_++;
@@ -614,6 +621,11 @@ void DisplayProbeWorker::photoRun() {
         filterMetrics_.galleryIndex = galleryIndex_;
         filterMetrics_.galleryPreset = galleryPreset_;
         filterMetrics_.galleryHasThumbnail = galleryHasThumbnail_;
+        filterMetrics_.photoStorageState = photoStore_.storageState();
+        filterMetrics_.photoWriteStage = photoStore_.writeStage();
+        filterMetrics_.photoWriteError = photoStore_.lastError();
+        int64_t freeBytes = photoStore_.freeBytes();
+        filterMetrics_.photoFreeMiB = freeBytes < 0 ? -1 : (int)(freeBytes / (1024 * 1024));
         filterMetrics_.scene = scene_;
         pthread_cond_broadcast(&condition_);
         pthread_mutex_unlock(&mutex_);

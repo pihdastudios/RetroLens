@@ -13,6 +13,25 @@ static const int kMaxPhotoEntries = 48;
 static const int kRecentPresetCount = 12;
 static const int kPresetAdjustmentCount = 3;
 
+enum PhotoStorageState {
+    kPhotoStorageNotConfigured = 0,
+    kPhotoStorageReady = 1,
+    kPhotoStorageInvalidRoot = 2,
+    kPhotoStorageDirectoryFailed = 3,
+    kPhotoStorageInsufficientSpace = 4,
+    kPhotoStorageIndexFailed = 5
+};
+
+enum PhotoWriteStage {
+    kPhotoStageNone = 0,
+    kPhotoStageEncode = 1,
+    kPhotoStageJpeg = 2,
+    kPhotoStageSidecar = 3,
+    kPhotoStageThumbnail = 4,
+    kPhotoStageIndex = 5,
+    kPhotoStageComplete = 6
+};
+
 struct RuntimeSettings {
     int selectedPreset;
     int intensity;
@@ -35,7 +54,7 @@ struct PhotoEntry {
 class PhotoStore {
   public:
     PhotoStore(const char* storageRoot, const char* cameraModel, const char* versionName);
-    bool initialize();
+    PhotoStorageState initialize();
     bool loadSettings(RuntimeSettings* settings);
     bool saveSettings(const RuntimeSettings& settings);
     bool savePhoto(const Pixel* frame, int presetIndex, int intensity, const int* adjustments,
@@ -47,9 +66,15 @@ class PhotoStore {
     bool deletePhoto(int newestIndex);
     int64_t freeBytes() const;
     const char* basePath() const;
+    PhotoStorageState storageState() const;
+    PhotoWriteStage writeStage() const;
+    int lastError() const;
 
   private:
-    bool loadIndex();
+    bool loadIndex(bool* needsRebuild);
+    bool rebuildIndex();
+    void cleanTemporaryFiles(const char* directory);
+    bool validateEntry(const PhotoEntry& entry) const;
     bool saveIndex();
     void addEntry(const PhotoEntry& entry);
     int storageIndex(int newestIndex) const;
@@ -68,6 +93,9 @@ class PhotoStore {
     char version_[32];
     PhotoEntry entries_[kMaxPhotoEntries];
     int entryCount_;
+    PhotoStorageState storageState_;
+    PhotoWriteStage writeStage_;
+    int lastError_;
 };
 
 } // namespace retrolens

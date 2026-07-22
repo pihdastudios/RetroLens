@@ -31,12 +31,17 @@ public final class RetroLensActivity extends BaseActivity
     super.onCreate(state);
     setContentView(R.layout.activity_retrolens);
     statusView = (StartupStatusView) findViewById(R.id.startupStatus);
+    StorageController.Result storage = StorageController.probe(NativeBridge.BUILD_ID);
+    Logger.configure(storage);
+    Logger.startSession(NativeBridge.BUILD_ID);
+    Logger.info("Storage: status=" + storage.status + " root=" + storage.root
+        + " freeBytes=" + storage.freeBytes + " detail=" + storage.detail);
+    Logger.flush();
     cameraController = new SonyCameraController(
         (android.view.SurfaceView) findViewById(R.id.sonyPreviewSurface), this);
     displayProbeController = new NativeDisplayProbeController(
-        (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this);
+        (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this, storage);
     mainHandler = new Handler();
-    Logger.startSession(NativeBridge.BUILD_ID);
     Logger.info("RetroLens: photo runtime created model=" + Build.MODEL + " sdk="
         + Build.VERSION.SDK_INT + " abi=" + Build.CPU_ABI + " build=" + NativeBridge.BUILD_ID);
   }
@@ -205,7 +210,7 @@ public final class RetroLensActivity extends BaseActivity
       else if (photoStatus == NativeBridge.PHOTO_BUSY)
         statusView.showTransient("SONY CAPTURED", "RETRO PHOTO WRITER BUSY", 1000L);
       else
-        statusView.showTransient("SONY CAPTURED", "RETRO DERIVATIVE UNAVAILABLE", 1000L);
+        statusView.showTransient("SONY SAVED", "RETRO STORAGE UNAVAILABLE", 1000L);
     } else {
       statusView.showTransient("CAPTURE UNAVAILABLE", "WAIT FOR CAMERA", 900L);
     }

@@ -1,5 +1,6 @@
 #include "photo_store.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -16,7 +17,10 @@ namespace retrolens {
 namespace {
 
 static bool makeDirectory(const char* path) {
-    return mkdir(path, 0775) == 0 || errno == EEXIST;
+    if (mkdir(path, 0775) == 0)
+        return true;
+    struct stat values;
+    return errno == EEXIST && stat(path, &values) == 0 && S_ISDIR(values.st_mode);
 }
 
 static bool flushAndClose(FILE* file) {
@@ -37,17 +41,44 @@ static void trimLine(char* value) {
 }
 
 static bool atomicReplace(const char* temporaryPath, const char* finalPath) {
-    if (rename(temporaryPath, finalPath) == 0)
+    if (rename(temporaryPath, finalPath) == 0) {
+        char parent[824];
+        strncpy(parent, finalPath, sizeof(parent) - 1);
+        parent[sizeof(parent) - 1] = 0;
+        char* slash = strrchr(parent, '/');
+        if (slash) {
+            *slash = 0;
+            int directory = open(parent, O_RDONLY);
+            if (directory >= 0) {
+                fsync(directory);
+                close(directory);
+            }
+        }
         return true;
+    }
     unlink(temporaryPath);
     return false;
+}
+
+static bool endsWith(const char* value, const char* suffix) {
+    size_t valueLength = value ? strlen(value) : 0;
+    size_t suffixLength = suffix ? strlen(suffix) : 0;
+    return valueLength >= suffixLength && !strcmp(value + valueLength - suffixLength, suffix);
+}
+
+static bool regularFileWithSize(const char* path, int64_t exactSize) {
+    struct stat values;
+    if (stat(path, &values) != 0 || !S_ISREG(values.st_mode))
+        return false;
+    return exactSize >= 0 ? values.st_size == exactSize : values.st_size > 0;
 }
 
 } // namespace
 
 PhotoStore::PhotoStore(const char* storageRoot, const char* cameraModel, const char* versionName)
-    : entryCount_(0) {
-    strncpy(root_, storageRoot ? storageRoot : "/mnt/sdcard", sizeof(root_) - 1);
+    : entryCount_(0), storageState_(kPhotoStorageNotConfigured), writeStage_(kPhotoStageNone),
+      lastError_(0) {
+    strncpy(root_, storageRoot ? storageRoot : "", sizeof(root_) - 1);
     root_[sizeof(root_) - 1] = 0;
     strncpy(model_, cameraModel ? cameraModel : "UNKNOWN", sizeof(model_) - 1);
     model_[sizeof(model_) - 1] = 0;
@@ -62,11 +93,31 @@ PhotoStore::PhotoStore(const char* storageRoot, const char* cameraModel, const c
     memset(entries_, 0, sizeof(entries_));
 }
 
-bool PhotoStore::initialize() {
+PhotoStorageState PhotoStore::initialize() {
+    if (!root_[0] || root_[0] != '/' || strstr(root_, "..")) {
+        storageState_ = kPhotoStorageInvalidRoot;
+        return storageState_;
+    }
     if (!makeDirectory(base_) || !makeDirectory(config_) || !makeDirectory(photos_) ||
-        !makeDirectory(thumbnails_))
-        return false;
-    return loadIndex();
+        !makeDirectory(thumbnails_)) {
+        lastError_ = errno;
+        storageState_ = kPhotoStorageDirectoryFailed;
+        return storageState_;
+    }
+    if (freeBytes() < (int64_t)64 * 1024 * 1024) {
+        storageState_ = kPhotoStorageInsufficientSpace;
+        return storageState_;
+    }
+    cleanTemporaryFiles(config_);
+    cleanTemporaryFiles(photos_);
+    cleanTemporaryFiles(thumbnails_);
+    bool needsRebuild = false;
+    if (!loadIndex(&needsRebuild) || (needsRebuild && !rebuildIndex())) {
+        storageState_ = kPhotoStorageIndexFailed;
+        return storageState_;
+    }
+    storageState_ = kPhotoStorageReady;
+    return storageState_;
 }
 
 bool PhotoStore::loadSettings(RuntimeSettings* settings) {
@@ -162,8 +213,15 @@ bool PhotoStore::savePhoto(const Pixel* frame, int presetIndex, int intensity,
                            const int* adjustments, bool favorite, int64_t timestampMs,
                            Pixel* scaled, unsigned char* encoded, int encodedCapacity,
                            int* encodedBytes) {
-    if (!frame || !scaled || !encoded || encodedCapacity <= 0)
+    writeStage_ = kPhotoStageEncode;
+    lastError_ = 0;
+    if (storageState_ != kPhotoStorageReady || !frame || !scaled || !encoded ||
+        encodedCapacity <= 0)
         return false;
+    if (freeBytes() < (int64_t)64 * 1024 * 1024) {
+        storageState_ = kPhotoStorageInsufficientSpace;
+        return false;
+    }
     for (int y = 0; y < kPhotoHeight; y++)
         for (int x = 0; x < kPhotoWidth; x++)
             scaled[y * kPhotoWidth + x] = frame[(y * kFrameHeight / kPhotoHeight) * kFrameWidth +
@@ -190,12 +248,16 @@ bool PhotoStore::savePhoto(const Pixel* frame, int presetIndex, int intensity,
     char finalPath[800], temporaryPath[824];
     photoPath(finalPath, sizeof(finalPath), entry.filename);
     snprintf(temporaryPath, sizeof(temporaryPath), "%s.tmp", finalPath);
+    writeStage_ = kPhotoStageJpeg;
     FILE* photo = fopen(temporaryPath, "wb");
+    if (!photo)
+        lastError_ = errno;
     if (!photo)
         return false;
     bool photoOk = fwrite(encoded, 1, jpegSize, photo) == jpegSize && flushAndClose(photo) &&
                    atomicReplace(temporaryPath, finalPath);
     if (!photoOk) {
+        lastError_ = errno;
         unlink(temporaryPath);
         return false;
     }
@@ -203,8 +265,10 @@ bool PhotoStore::savePhoto(const Pixel* frame, int presetIndex, int intensity,
     char sidecar[800], sidecarTemporary[824];
     sidecarPath(sidecar, sizeof(sidecar), entry.filename);
     snprintf(sidecarTemporary, sizeof(sidecarTemporary), "%s.tmp", sidecar);
+    writeStage_ = kPhotoStageSidecar;
     FILE* manifest = fopen(sidecarTemporary, "w");
     if (!manifest) {
+        lastError_ = errno;
         unlink(finalPath);
         return false;
     }
@@ -233,8 +297,10 @@ bool PhotoStore::savePhoto(const Pixel* frame, int presetIndex, int intensity,
     char thumbnail[800], thumbnailTemporary[824];
     thumbnailPath(thumbnail, sizeof(thumbnail), entry.filename);
     snprintf(thumbnailTemporary, sizeof(thumbnailTemporary), "%s.tmp", thumbnail);
+    writeStage_ = kPhotoStageThumbnail;
     FILE* thumb = fopen(thumbnailTemporary, "wb");
     if (!thumb) {
+        lastError_ = errno;
         unlink(sidecar);
         unlink(finalPath);
         return false;
@@ -257,7 +323,9 @@ bool PhotoStore::savePhoto(const Pixel* frame, int presetIndex, int intensity,
     if (hasEvicted)
         evicted = entries_[0];
     addEntry(entry);
+    writeStage_ = kPhotoStageIndex;
     if (!saveIndex()) {
+        lastError_ = errno;
         memcpy(entries_, previousEntries, sizeof(entries_));
         entryCount_ = previousCount;
         unlink(thumbnail);
@@ -276,6 +344,7 @@ bool PhotoStore::savePhoto(const Pixel* frame, int presetIndex, int intensity,
     }
     if (encodedBytes)
         *encodedBytes = (int)jpegSize;
+    writeStage_ = kPhotoStageComplete;
     return true;
 }
 
@@ -342,25 +411,51 @@ const char* PhotoStore::basePath() const {
     return base_;
 }
 
-bool PhotoStore::loadIndex() {
+PhotoStorageState PhotoStore::storageState() const {
+    return storageState_;
+}
+
+PhotoWriteStage PhotoStore::writeStage() const {
+    return writeStage_;
+}
+
+int PhotoStore::lastError() const {
+    return lastError_;
+}
+
+bool PhotoStore::loadIndex(bool* needsRebuild) {
     entryCount_ = 0;
+    if (needsRebuild)
+        *needsRebuild = false;
     FILE* file = fopen(indexPath_, "r");
-    if (!file)
+    if (!file) {
+        if (needsRebuild)
+            *needsRebuild = true;
         return true;
+    }
     char line[320];
     while (entryCount_ < kMaxPhotoEntries && fgets(line, sizeof(line), file)) {
         trimLine(line);
         char* first = strchr(line, '|');
-        if (!first)
+        if (!first) {
+            if (needsRebuild)
+                *needsRebuild = true;
             continue;
+        }
         *first++ = 0;
         char* second = strchr(first, '|');
-        if (!second)
+        if (!second) {
+            if (needsRebuild)
+                *needsRebuild = true;
             continue;
+        }
         *second++ = 0;
         char* third = strchr(second, '|');
-        if (!third)
+        if (!third) {
+            if (needsRebuild)
+                *needsRebuild = true;
             continue;
+        }
         *third++ = 0;
         PhotoEntry& entry = entries_[entryCount_];
         memset(&entry, 0, sizeof(entry));
@@ -368,10 +463,97 @@ bool PhotoStore::loadIndex() {
         strncpy(entry.filename, first, sizeof(entry.filename) - 1);
         entry.presetIndex = findPreset(second);
         entry.favorite = atoi(third) != 0;
-        entryCount_++;
+        if (!strcmp(presetAt(entry.presetIndex).id, second) && validateEntry(entry))
+            entryCount_++;
+        else if (needsRebuild)
+            *needsRebuild = true;
     }
     fclose(file);
     return true;
+}
+
+void PhotoStore::cleanTemporaryFiles(const char* directory) {
+    DIR* stream = opendir(directory);
+    if (!stream)
+        return;
+    struct dirent* item = 0;
+    int inspected = 0;
+    while (inspected++ < 256 && (item = readdir(stream)) != 0) {
+        if (!endsWith(item->d_name, ".tmp"))
+            continue;
+        char path[800];
+        snprintf(path, sizeof(path), "%s/%s", directory, item->d_name);
+        unlink(path);
+    }
+    closedir(stream);
+}
+
+bool PhotoStore::validateEntry(const PhotoEntry& entry) const {
+    if (!entry.filename[0] || strstr(entry.filename, "..") || strchr(entry.filename, '/') ||
+        !endsWith(entry.filename, ".jpg"))
+        return false;
+    char photo[800], sidecar[800], thumbnail[800];
+    photoPath(photo, sizeof(photo), entry.filename);
+    sidecarPath(sidecar, sizeof(sidecar), entry.filename);
+    thumbnailPath(thumbnail, sizeof(thumbnail), entry.filename);
+    return regularFileWithSize(photo, -1) && regularFileWithSize(sidecar, -1) &&
+           regularFileWithSize(thumbnail, kFrameWidth * kFrameHeight * (int)sizeof(Pixel));
+}
+
+bool PhotoStore::rebuildIndex() {
+    entryCount_ = 0;
+    DIR* stream = opendir(photos_);
+    if (!stream)
+        return false;
+    struct dirent* item = 0;
+    int inspected = 0;
+    while (inspected++ < 512 && (item = readdir(stream)) != 0) {
+        if (!endsWith(item->d_name, "_preview.jpg") || strchr(item->d_name, '/') ||
+            strstr(item->d_name, ".."))
+            continue;
+        PhotoEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        strncpy(entry.filename, item->d_name, sizeof(entry.filename) - 1);
+        char photo[800];
+        photoPath(photo, sizeof(photo), entry.filename);
+        struct stat values;
+        if (stat(photo, &values) == 0)
+            entry.timestampMs = (int64_t)values.st_mtime * 1000;
+        entry.presetIndex = 0;
+        bool presetFound = false;
+        for (int preset = 0; preset < presetCount(); preset++) {
+            char suffix[96];
+            snprintf(suffix, sizeof(suffix), "_%s_preview.jpg", presetAt(preset).id);
+            if (endsWith(entry.filename, suffix)) {
+                entry.presetIndex = preset;
+                presetFound = true;
+                break;
+            }
+        }
+        if (presetFound && validateEntry(entry)) {
+            if (entryCount_ < kMaxPhotoEntries) {
+                entries_[entryCount_++] = entry;
+            } else {
+                int oldest = 0;
+                for (int index = 1; index < entryCount_; index++)
+                    if (entries_[index].timestampMs < entries_[oldest].timestampMs)
+                        oldest = index;
+                if (entry.timestampMs > entries_[oldest].timestampMs)
+                    entries_[oldest] = entry;
+            }
+        }
+    }
+    closedir(stream);
+    for (int i = 0; i < entryCount_; i++) {
+        for (int j = i + 1; j < entryCount_; j++) {
+            if (entries_[j].timestampMs < entries_[i].timestampMs) {
+                PhotoEntry swap = entries_[i];
+                entries_[i] = entries_[j];
+                entries_[j] = swap;
+            }
+        }
+    }
+    return saveIndex();
 }
 
 bool PhotoStore::saveIndex() {

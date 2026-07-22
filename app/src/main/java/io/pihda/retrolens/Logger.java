@@ -1,15 +1,22 @@
 package io.pihda.retrolens;
 
-import android.os.Environment;
 import java.io.*;
 
 public class Logger {
   public static final boolean EXTERNAL_LOGGING_ENABLED = true;
   private static final int MAX_BUFFER_CHARS = 32768;
   private static final StringBuffer pending = new StringBuffer();
+  private static File storageRoot;
+
+  public static synchronized void configure(StorageController.Result storage) {
+    storageRoot = storage != null && storage.isReady() ? new File(storage.root) : null;
+    if (storage == null || !storage.isReady())
+      android.util.Log.e("RetroLens",
+          "External logging disabled: " + (storage == null ? "no storage result" : storage.detail));
+  }
 
   public static File getFile() {
-    return new File(Environment.getExternalStorageDirectory(), "RETROLENS/LOG.TXT");
+    return storageRoot == null ? null : new File(storageRoot, "RETROLENS/LOG.TXT");
   }
 
   public static void installUncaughtExceptionHandler() {
@@ -39,6 +46,8 @@ public class Logger {
     }
     if (pending.length() == 0)
       return;
+    if (getFile() == null)
+      return;
     if (appendToFile(pending.toString()))
       pending.setLength(0);
   }
@@ -66,10 +75,14 @@ public class Logger {
     if (!EXTERNAL_LOGGING_ENABLED)
       return true;
     try {
-      getFile().getParentFile().mkdirs();
-      BufferedWriter writer = new BufferedWriter(new FileWriter(getFile(), true));
-      writer.append(text);
-      writer.close();
+      File file = getFile();
+      file.getParentFile().mkdirs();
+      FileOutputStream stream = new FileOutputStream(file, true);
+      OutputStreamWriter output = new OutputStreamWriter(stream, "UTF-8");
+      output.write(text);
+      output.flush();
+      stream.getFD().sync();
+      output.close();
       return true;
     } catch (IOException e) {
       android.util.Log.e("RetroLens", "File logging failed", e);

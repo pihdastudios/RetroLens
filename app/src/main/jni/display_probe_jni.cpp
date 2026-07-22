@@ -155,14 +155,16 @@ extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeSet
 extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeGetDisplayProbeStats(
     JNIEnv* env, jclass, jlong handle, jintArray output) {
     DisplayProbe* probe = from(handle);
-    if (!probe || !output || env->GetArrayLength(output) < 8)
+    if (!probe || !output || env->GetArrayLength(output) < 12)
         return;
     retrolens::FilterProbeMetrics metrics;
     probe->worker.getFilterStats(&metrics);
-    jint values[8] = {metrics.selectedPreset,    metrics.photoSavedCount, metrics.photoFailedCount,
-                      metrics.photoEncodedBytes, metrics.photoStatus,     metrics.galleryPhotoCount,
-                      metrics.processedFrames,   metrics.decodeFailures};
-    env->SetIntArrayRegion(output, 0, 8, values);
+    jint values[12] = {
+        metrics.selectedPreset,    metrics.photoSavedCount, metrics.photoFailedCount,
+        metrics.photoEncodedBytes, metrics.photoStatus,     metrics.galleryPhotoCount,
+        metrics.processedFrames,   metrics.decodeFailures,  metrics.photoStorageState,
+        metrics.photoWriteStage,   metrics.photoWriteError, metrics.photoFreeMiB};
+    env->SetIntArrayRegion(output, 0, 12, values);
 }
 
 extern "C" JNIEXPORT void JNICALL
