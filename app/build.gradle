@@ -1,0 +1,44 @@
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 10
+    buildToolsVersion "25.0.2"
+
+    defaultConfig {
+        applicationId "io.pihda.retrolens"
+        minSdkVersion 10
+        targetSdkVersion 10
+        versionCode 1
+        versionName "1.0.0"
+
+        ndk {
+            abiFilters "armeabi"
+        }
+
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_6
+        targetCompatibility JavaVersion.VERSION_1_6
+    }
+
+    sourceSets {
+        main {
+            jni.srcDirs = []
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+
+}
+
+android.applicationVariants.all { variant ->
+    variant.outputs.each { output ->
+        def apkName = "RetroLens-${output.baseName}-${variant.versionName}.apk"
+        output.outputFile = new File(output.outputFile.parent, apkName)
+    }
+}
+
+dependencies {
+    compile files('libs/openmemories-framework-f8df3504d8.jar')
+    provided files('libs/openmemories-stubs-f8df3504d8.jar')
+}
