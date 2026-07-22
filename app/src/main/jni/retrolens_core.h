@@ -7,10 +7,13 @@
 
 namespace retrolens {
 
-static const int kFrameWidth = 320;
-static const int kFrameHeight = 240;
+// PicoJPEG reduced mode yields one real color sample per source 8x8 block.
+static const int kFrameWidth = 80;
+static const int kFrameHeight = 60;
 static const int kMaxPresets = 70;
 static const int kMaxAviFrames = 9000;
+static const bool kRetroClipEnabled = false;
+static const bool kProcessedDerivativeEnabled = false;
 
 struct Pixel {
     uint8_t r;
@@ -73,6 +76,9 @@ int findPreset(const char* id);
 void processFrame(const Pixel* source, Pixel* output, Pixel* scratch, const Pixel* previous,
                   int width, int height, const Preset& preset, int intensity, uint32_t seed,
                   int64_t timestampMs);
+bool blitRgb565(const uint16_t* source, int sourceWidth, int sourceHeight, void* destination,
+                int destinationWidth, int destinationHeight, int destinationStride,
+                int destinationFormat);
 uint32_t nextRandom(uint32_t* state);
 void jsonEscape(FILE* output, const char* value);
 

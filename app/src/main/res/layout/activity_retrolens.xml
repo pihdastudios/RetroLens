@@ -12,6 +12,10 @@
     <SurfaceView
         android:id="@+id/retroLensSurface"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="#111315" />
+        android:layout_height="match_parent" />
+
+    <io.pihda.retrolens.StartupStatusView
+        android:id="@+id/startupStatus"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 </FrameLayout>

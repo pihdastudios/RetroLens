@@ -27,6 +27,13 @@ static const int kSourceGridWidth = 80;
 static const int kSourceGridHeight = 60;
 static const int kSurfaceWidth = 640;
 static const int kSurfaceHeight = 480;
+enum SurfaceStatus {
+    SURFACE_OK = 0,
+    SURFACE_NO_WINDOW = 1,
+    SURFACE_LOCK_FAILED = 2,
+    SURFACE_FORMAT_UNSUPPORTED = 3,
+    SURFACE_POST_FAILED = 4
+};
 
 enum Scene { SCENE_CAMERA = 0, SCENE_DRAWER = 1, SCENE_BROWSER = 2, SCENE_GALLERY = 3 };
 enum RecorderJob { JOB_NONE = 0, JOB_SNAPSHOT = 1, JOB_VIDEO = 2 };
@@ -93,6 +100,13 @@ static uint16_t blend565(uint16_t base, uint16_t over, int alpha) {
                   (bb * (100 - alpha) + ob * alpha) / 100);
 }
 
+static uint16_t shade565(uint16_t color, int amount256) {
+    int red = ((color >> 11) & 31) * amount256 >> 8;
+    int green = ((color >> 5) & 63) * amount256 >> 8;
+    int blue = (color & 31) * amount256 >> 8;
+    return (uint16_t)((red << 11) | (green << 5) | blue);
+}
+
 static const unsigned char kGlyphs[36][7] = {
     {14, 17, 17, 31, 17, 17, 17}, {30, 17, 17, 30, 17, 17, 30}, {14, 17, 16, 16, 16, 17, 14},
     {30, 17, 17, 17, 17, 17, 30}, {31, 16, 16, 30, 16, 16, 31}, {31, 16, 16, 30, 16, 16, 16},
@@ -122,20 +136,23 @@ class Runtime {
     Runtime(const char* root, const char* model, const char* version)
         : window_(0), running_(true), valid_(true), threadStarted_(false),
           recorderThreadStarted_(false), framePending_(false), frameInUse_(false), jpegLength_(0),
-          frameTimestamp_(0), hasFrame_(false), hasPrevious_(false), selected_(0), intensity_(100),
-          scene_(SCENE_CAMERA), controlsVisible_(true), compare_(false), touchActive_(false),
-          favoriteMaskLo_(0), favoriteMaskHi_(0), frameCount_(0), droppedFrames_(0), decodeMs_(0),
-          filterMs_(0), renderMs_(0), fps_(0), fpsFrames_(0), fpsStart_(monotonicMs()),
-          startMs_(monotonicMs()), lastFrameMs_(0), lastTouchMs_(0), touchDownMs_(0),
-          touchStartX_(0), touchStartY_(0), error_(false), captureFlashUntil_(0),
-          saveRequest_(false), saveTimestamp_(0), savePreset_(0), saveIntensity_(100),
-          recThreadRunning_(true), recCommand_(0), recPending_(false), recJob_(JOB_NONE),
-          recPreset_(0), recIntensity_(100), recording_(false), recordingInterrupted_(false),
-          recordStartMs_(0), recordEndMs_(0), lastRecordFrameMs_(0), recordPreset_(0),
-          recordIntensity_(100), recordFrames_(0), recordDropped_(0), settingsDirty_(false),
-          logFile_(0) {
+          frameTimestamp_(0), lastAcceptedTimestamp_(0), renderRequested_(true), hasFrame_(false),
+          hasPrevious_(false), selected_(0), intensity_(100), scene_(SCENE_CAMERA),
+          controlsVisible_(true), compare_(false), touchActive_(false), favoriteMaskLo_(0),
+          favoriteMaskHi_(0), frameCount_(0), droppedFrames_(0), decodeMs_(0), filterMs_(0),
+          renderMs_(0), fps_(0), fpsFrames_(0), statsDroppedStart_(0), targetFps_(10),
+          decodeFailures_(0), surfaceWidth_(0), surfaceHeight_(0), surfaceFormat_(0),
+          fpsStart_(monotonicMs()), startMs_(monotonicMs()), lastFrameMs_(0), lastTouchMs_(0),
+          touchDownMs_(0), touchStartX_(0), touchStartY_(0), error_(false), captureFlashUntil_(0),
+          featureMessageUntil_(0), saveRequest_(false), saveTimestamp_(0), savePreset_(0),
+          saveIntensity_(100), recThreadRunning_(true), recCommand_(0), recPending_(false),
+          recJob_(JOB_NONE), recPreset_(0), recIntensity_(100), recording_(false),
+          recordingInterrupted_(false), recordStartMs_(0), recordEndMs_(0), lastRecordFrameMs_(0),
+          recordPreset_(0), recordIntensity_(100), recordFrames_(0), recordDropped_(0),
+          settingsDirty_(false), logFile_(0) {
         pthread_mutex_init(&mutex_, 0);
         pthread_cond_init(&condition_, 0);
+        pthread_mutex_init(&renderMutex_, 0);
         pthread_mutex_init(&recMutex_, 0);
         pthread_cond_init(&recCondition_, 0);
         strncpy(root_, root ? root : "/mnt/sdcard", sizeof(root_) - 1);
@@ -148,14 +165,20 @@ class Runtime {
         input_ = (unsigned char*)malloc(kInputCapacity);
         raw_ = (Pixel*)malloc(retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel));
         output_ = (Pixel*)malloc(retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel));
-        scratch_ = (Pixel*)malloc(retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel));
+        scratch_ = 0;
         previous_ =
             (Pixel*)malloc(retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel));
-        recorderFrame_ =
-            (Pixel*)malloc(retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel));
-        encoded_ = (unsigned char*)malloc(kEncodedCapacity);
-        if (!input_ || !raw_ || !output_ || !scratch_ || !previous_ || !recorderFrame_ ||
-            !encoded_) {
+        compose_ = (uint16_t*)malloc(kSurfaceWidth * kSurfaceHeight * sizeof(uint16_t));
+        recorderFrame_ = 0;
+        encoded_ = 0;
+        if (retrolens::kRetroClipEnabled || retrolens::kProcessedDerivativeEnabled) {
+            recorderFrame_ =
+                (Pixel*)malloc(retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel));
+            encoded_ = (unsigned char*)malloc(kEncodedCapacity);
+        }
+        if (!input_ || !raw_ || !output_ || !previous_ || !compose_ ||
+            ((retrolens::kRetroClipEnabled || retrolens::kProcessedDerivativeEnabled) &&
+             (!recorderFrame_ || !encoded_))) {
             valid_ = false;
             running_ = false;
             error_ = true;
@@ -169,9 +192,10 @@ class Runtime {
         loadSettings();
         log("runtime create version=%s model=%s presets=%d allocations=%lu", version_, model_,
             retrolens::presetCount(),
-            (unsigned long)(kInputCapacity + kEncodedCapacity +
-                            5 * retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel)));
-        if (pthread_create(&recorderThread_, 0, recorderEntry, this) == 0)
+            (unsigned long)(kInputCapacity + kSurfaceWidth * kSurfaceHeight * sizeof(uint16_t) +
+                            3 * retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel)));
+        if ((retrolens::kRetroClipEnabled || retrolens::kProcessedDerivativeEnabled) &&
+            pthread_create(&recorderThread_, 0, recorderEntry, this) == 0)
             recorderThreadStarted_ = true;
         if (pthread_create(&thread_, 0, processEntry, this) == 0)
             threadStarted_ = true;
@@ -191,7 +215,8 @@ class Runtime {
         if (recorderThreadStarted_)
             pthread_join(recorderThread_, 0);
         clearSurface();
-        saveSettingsNow();
+        if (settingsDirty_)
+            saveSettingsNow();
         log("runtime destroyed frames=%d dropped=%d", frameCount_, droppedFrames_);
         if (logFile_)
             fclose(logFile_);
@@ -200,10 +225,12 @@ class Runtime {
         free(output_);
         free(scratch_);
         free(previous_);
+        free(compose_);
         free(recorderFrame_);
         free(encoded_);
         pthread_cond_destroy(&condition_);
         pthread_mutex_destroy(&mutex_);
+        pthread_mutex_destroy(&renderMutex_);
         pthread_cond_destroy(&recCondition_);
         pthread_mutex_destroy(&recMutex_);
     }
@@ -212,17 +239,22 @@ class Runtime {
         return valid_;
     }
 
-    void setSurface(ANativeWindow* window) {
+    int setSurface(ANativeWindow* window) {
+        if (!window)
+            return SURFACE_NO_WINDOW;
         pthread_mutex_lock(&mutex_);
         if (window_)
             ANativeWindow_release(window_);
         window_ = window;
-        if (window_)
-            ANativeWindow_setBuffersGeometry(window_, kSurfaceWidth, kSurfaceHeight,
-                                             WINDOW_FORMAT_RGB_565);
+        int geometry = ANativeWindow_setBuffersGeometry(window_, kSurfaceWidth, kSurfaceHeight,
+                                                        WINDOW_FORMAT_RGB_565);
+        renderRequested_ = true;
         pthread_cond_signal(&condition_);
         pthread_mutex_unlock(&mutex_);
-        log("surface attached");
+        int result = render();
+        log("surface probe result=%d geometryResult=%d width=%d height=%d format=%d", result,
+            geometry, surfaceWidth_, surfaceHeight_, surfaceFormat_);
+        return result;
     }
     void clearSurface() {
         pthread_mutex_lock(&mutex_);
@@ -236,6 +268,11 @@ class Runtime {
         if (!data || length <= 0 || length > kInputCapacity)
             return false;
         pthread_mutex_lock(&mutex_);
+        int minimumInterval = targetFps_ > 0 ? 1000 / targetFps_ : 100;
+        if (lastAcceptedTimestamp_ && timestamp - lastAcceptedTimestamp_ < minimumInterval) {
+            pthread_mutex_unlock(&mutex_);
+            return false;
+        }
         if (!running_ || framePending_ || frameInUse_) {
             droppedFrames_++;
             pthread_mutex_unlock(&mutex_);
@@ -244,6 +281,7 @@ class Runtime {
         memcpy(input_, data, (size_t)length);
         jpegLength_ = length;
         frameTimestamp_ = timestamp;
+        lastAcceptedTimestamp_ = timestamp;
         framePending_ = true;
         pthread_cond_signal(&condition_);
         pthread_mutex_unlock(&mutex_);
@@ -255,12 +293,17 @@ class Runtime {
         strncpy(errorText_, value ? value : "Analytical live view unavailable",
                 sizeof(errorText_) - 1);
         errorText_[sizeof(errorText_) - 1] = 0;
+        renderRequested_ = true;
         pthread_cond_signal(&condition_);
         pthread_mutex_unlock(&mutex_);
     }
     void key(int key, bool down, int64_t now) {
         if (key == 8) {
+            pthread_mutex_lock(&mutex_);
             compare_ = down;
+            renderRequested_ = true;
+            pthread_cond_signal(&condition_);
+            pthread_mutex_unlock(&mutex_);
             return;
         }
         if (!down)
@@ -293,6 +336,7 @@ class Runtime {
         else if (key == 9)
             scene_ = SCENE_CAMERA;
         settingsDirty_ = true;
+        renderRequested_ = true;
         pthread_cond_signal(&condition_);
         pthread_mutex_unlock(&mutex_);
         (void)now;
@@ -335,13 +379,20 @@ class Runtime {
             touchActive_ = false;
         }
         settingsDirty_ = true;
+        renderRequested_ = true;
         pthread_cond_signal(&condition_);
         pthread_mutex_unlock(&mutex_);
     }
     void captureRequested(int64_t now) {
+        pthread_mutex_lock(&mutex_);
         captureFlashUntil_ = now + 180;
+        renderRequested_ = true;
+        pthread_cond_signal(&condition_);
+        pthread_mutex_unlock(&mutex_);
     }
     void saveSnapshot(int64_t timestamp) {
+        if (!retrolens::kProcessedDerivativeEnabled)
+            return;
         pthread_mutex_lock(&mutex_);
         saveRequest_ = true;
         saveTimestamp_ = timestamp;
@@ -351,6 +402,15 @@ class Runtime {
         pthread_mutex_unlock(&mutex_);
     }
     void toggleRecording(int64_t timestamp) {
+        if (!retrolens::kRetroClipEnabled) {
+            pthread_mutex_lock(&mutex_);
+            featureMessageUntil_ = timestamp + 1800;
+            renderRequested_ = true;
+            pthread_cond_signal(&condition_);
+            pthread_mutex_unlock(&mutex_);
+            log("Retro Clip disabled in stability build");
+            return;
+        }
         pthread_mutex_lock(&recMutex_);
         recCommand_ = recording_ ? 2 : 1;
         recordingInterrupted_ = false;
@@ -368,6 +428,24 @@ class Runtime {
         }
         pthread_mutex_unlock(&recMutex_);
     }
+    void getStats(int* output, int count) {
+        if (!output || count < 10)
+            return;
+        pthread_mutex_lock(&renderMutex_);
+        pthread_mutex_lock(&mutex_);
+        output[0] = fps_;
+        output[1] = frameCount_;
+        output[2] = droppedFrames_;
+        output[3] = decodeMs_;
+        output[4] = filterMs_;
+        output[5] = renderMs_;
+        output[6] = surfaceWidth_;
+        output[7] = surfaceHeight_;
+        output[8] = surfaceFormat_;
+        output[9] = targetFps_;
+        pthread_mutex_unlock(&mutex_);
+        pthread_mutex_unlock(&renderMutex_);
+    }
 
   private:
     ANativeWindow* window_;
@@ -376,21 +454,27 @@ class Runtime {
     bool running_, valid_, threadStarted_, recorderThreadStarted_;
     pthread_mutex_t mutex_;
     pthread_cond_t condition_;
+    pthread_mutex_t renderMutex_;
     unsigned char* input_;
     bool framePending_, frameInUse_;
     int jpegLength_;
-    int64_t frameTimestamp_;
+    int64_t frameTimestamp_, lastAcceptedTimestamp_;
+    bool renderRequested_;
     Pixel *raw_, *output_, *scratch_, *previous_;
+    uint16_t* compose_;
     bool hasFrame_, hasPrevious_;
     int selected_, intensity_, scene_;
     bool controlsVisible_, compare_, touchActive_;
     uint64_t favoriteMaskLo_, favoriteMaskHi_;
     int frameCount_, droppedFrames_, decodeMs_, filterMs_, renderMs_, fps_, fpsFrames_;
+    int statsDroppedStart_, targetFps_, decodeFailures_;
+    int surfaceWidth_, surfaceHeight_, surfaceFormat_;
     int64_t fpsStart_, startMs_, lastFrameMs_, lastTouchMs_, touchDownMs_;
     float touchStartX_, touchStartY_;
     bool error_;
     char errorText_[192];
     int64_t captureFlashUntil_;
+    int64_t featureMessageUntil_;
     bool saveRequest_;
     int64_t saveTimestamp_;
     int savePreset_, saveIntensity_;
@@ -433,7 +517,6 @@ class Runtime {
             logFile_ = fopen(logPath_, "a");
         if (logFile_) {
             fprintf(logFile_, "[%lld] %s\n", (long long)monotonicMs(), text);
-            fflush(logFile_);
         }
     }
     void setupPaths() {
@@ -523,18 +606,13 @@ class Runtime {
         JpegInput input = {jpeg, (size_t)length, 0};
         pjpeg_image_info_t info;
         unsigned char status = pjpeg_decode_init(&info, readJpeg, &input, 1);
-        if (status || info.m_width != 640 || info.m_height != 480) {
-            log("JPEG decode init failed status=%u dimensions=%dx%d", (unsigned)status,
-                info.m_width, info.m_height);
+        if (status || info.m_width != 640 || info.m_height != 480)
             return false;
-        }
         for (int my = 0; my < info.m_MCUSPerCol; my++)
             for (int mx = 0; mx < info.m_MCUSPerRow; mx++) {
                 status = pjpeg_decode_mcu();
-                if (status) {
-                    log("JPEG MCU failed status=%u", (unsigned)status);
+                if (status)
                     return false;
-                }
                 int left = mx * info.m_MCUWidth, top = my * info.m_MCUHeight,
                     right = left + info.m_MCUWidth, bottom = top + info.m_MCUHeight;
                 if (right > info.m_width)
@@ -564,15 +642,24 @@ class Runtime {
     void processLoop() {
         while (true) {
             pthread_mutex_lock(&mutex_);
-            if (running_ && !framePending_) {
-                struct timespec t;
-                clock_gettime(CLOCK_REALTIME, &t);
-                t.tv_nsec += 33000000;
-                if (t.tv_nsec >= 1000000000) {
-                    t.tv_sec++;
-                    t.tv_nsec -= 1000000000;
+            while (running_ && !framePending_ && !renderRequested_) {
+                int64_t now = monotonicMs();
+                bool animation = (!hasFrame_ && now - startMs_ < 850) || captureFlashUntil_ > now ||
+                                 featureMessageUntil_ > now ||
+                                 (touchActive_ && now - touchDownMs_ < 500);
+                if (animation) {
+                    struct timespec t;
+                    clock_gettime(CLOCK_REALTIME, &t);
+                    t.tv_nsec += 67000000;
+                    if (t.tv_nsec >= 1000000000) {
+                        t.tv_sec++;
+                        t.tv_nsec -= 1000000000;
+                    }
+                    pthread_cond_timedwait(&condition_, &mutex_, &t);
+                    renderRequested_ = true;
+                } else {
+                    pthread_cond_wait(&condition_, &mutex_);
                 }
-                pthread_cond_timedwait(&condition_, &mutex_, &t);
             }
             if (!running_) {
                 pthread_mutex_unlock(&mutex_);
@@ -581,6 +668,10 @@ class Runtime {
             bool frame = framePending_;
             int length = jpegLength_;
             int64_t timestamp = frameTimestamp_;
+            int framePreset = selected_;
+            int frameIntensity = intensity_;
+            bool renderNow = renderRequested_;
+            renderRequested_ = false;
             if (frame) {
                 framePending_ = false;
                 frameInUse_ = true;
@@ -591,10 +682,10 @@ class Runtime {
                 bool decoded = decodeReduced(input_, length);
                 int64_t decodedAt = monotonicMs();
                 if (decoded) {
-                    const Preset& p = retrolens::presetAt(selected_);
+                    const Preset& p = retrolens::presetAt(framePreset);
                     retrolens::processFrame(raw_, output_, scratch_, hasPrevious_ ? previous_ : 0,
                                             retrolens::kFrameWidth, retrolens::kFrameHeight, p,
-                                            intensity_, 0x52455452U, timestamp);
+                                            frameIntensity, 0x52455452U, timestamp);
                     memcpy(previous_, output_,
                            retrolens::kFrameWidth * retrolens::kFrameHeight * sizeof(Pixel));
                     hasPrevious_ = true;
@@ -603,26 +694,40 @@ class Runtime {
                     lastFrameMs_ = timestamp;
                     frameCount_++;
                     fpsFrames_++;
+                    renderNow = true;
                     int64_t now = monotonicMs();
                     decodeMs_ = (int)(decodedAt - begin);
                     filterMs_ = (int)(now - decodedAt);
                     if (now - fpsStart_ >= 3000) {
                         fps_ = (int)(fpsFrames_ * 1000 / (now - fpsStart_));
+                        int intervalDrops = droppedFrames_ - statsDroppedStart_;
+                        retrolens::PerformanceDecision decision = retrolens::choosePerformance(
+                            decodeMs_, filterMs_, renderMs_, intervalDrops, -1);
+                        targetFps_ = decision.targetFps;
                         log("performance processedFps=%d decodeMs=%d filterMs=%d "
-                            "renderMs=%d jpegBytes=%d dropped=%d",
-                            fps_, decodeMs_, filterMs_, renderMs_, length, droppedFrames_);
+                            "renderMs=%d jpegBytes=%d dropped=%d intervalDropped=%d targetFps=%d",
+                            fps_, decodeMs_, filterMs_, renderMs_, length, droppedFrames_,
+                            intervalDrops, targetFps_);
                         fpsFrames_ = 0;
                         fpsStart_ = now;
+                        statsDroppedStart_ = droppedFrames_;
                     }
+                } else {
+                    decodeFailures_++;
+                    if (decodeFailures_ <= 3 || decodeFailures_ % 100 == 0)
+                        log("JPEG decode failed count=%d bytes=%d", decodeFailures_, length);
                 }
                 pthread_mutex_lock(&mutex_);
                 frameInUse_ = false;
                 pthread_mutex_unlock(&mutex_);
             }
-            queueOutputJobs(timestamp);
-            int64_t rb = monotonicMs();
-            render();
-            renderMs_ = (int)(monotonicMs() - rb);
+            if (retrolens::kRetroClipEnabled || retrolens::kProcessedDerivativeEnabled)
+                queueOutputJobs(timestamp);
+            if (renderNow) {
+                int64_t rb = monotonicMs();
+                render();
+                renderMs_ = (int)(monotonicMs() - rb);
+            }
         }
     }
     void queueOutputJobs(int64_t timestamp) {
@@ -836,33 +941,50 @@ class Runtime {
             x += 6 * scale;
         }
     }
-    void render() {
+    int render() {
+        pthread_mutex_lock(&renderMutex_);
         pthread_mutex_lock(&mutex_);
         ANativeWindow* win = window_;
         if (win)
             ANativeWindow_acquire(win);
         pthread_mutex_unlock(&mutex_);
-        if (!win)
-            return;
+        if (!win) {
+            pthread_mutex_unlock(&renderMutex_);
+            return SURFACE_NO_WINDOW;
+        }
         ANativeWindow_Buffer b;
         if (ANativeWindow_lock(win, &b, 0) != 0) {
             ANativeWindow_release(win);
-            return;
+            pthread_mutex_unlock(&renderMutex_);
+            return SURFACE_LOCK_FAILED;
         }
-        uint16_t* bits = (uint16_t*)b.bits;
-        int stride = b.stride;
+        pthread_mutex_lock(&mutex_);
+        surfaceWidth_ = b.width;
+        surfaceHeight_ = b.height;
+        surfaceFormat_ = b.format;
+        uint16_t* bits = compose_;
+        int stride = kSurfaceWidth;
         int64_t now = monotonicMs();
         if (touchActive_ && now - touchDownMs_ > 450)
             compare_ = true;
         rect(bits, stride, 0, 0, kSurfaceWidth, kSurfaceHeight, rgb565(15, 18, 20), 100);
         if (hasFrame_) {
             const Pixel* src = compare_ ? raw_ : output_;
+            int displayFlags = retrolens::presetAt(selected_).flags;
             for (int y = 0; y < kSurfaceHeight; y++) {
                 int sy = y * retrolens::kFrameHeight / kSurfaceHeight;
                 for (int x = 0; x < kSurfaceWidth; x++) {
                     int sx = x * retrolens::kFrameWidth / kSurfaceWidth;
                     const Pixel& p = src[sy * retrolens::kFrameWidth + sx];
-                    bits[y * stride + x] = rgb565(p.r, p.g, p.b);
+                    uint16_t color = rgb565(p.r, p.g, p.b);
+                    if ((displayFlags & retrolens::FX_SCANLINES) && (y & 1))
+                        color = shade565(color, 176);
+                    if ((displayFlags & retrolens::FX_MASK) && ((x + y) % 3))
+                        color = shade565(color, 216);
+                    if ((displayFlags & retrolens::FX_VIGNETTE) &&
+                        (x < 42 || x >= kSurfaceWidth - 42 || y < 30 || y >= kSurfaceHeight - 30))
+                        color = shade565(color, 184);
+                    bits[y * stride + x] = color;
                 }
             }
         }
@@ -935,10 +1057,10 @@ class Runtime {
         } else if (scene_ == SCENE_GALLERY) {
             rect(bits, stride, 34, 46, 572, 360, panel, 95);
             text(bits, stride, 60, 68, "RETROLENS GALLERY", accent, 2);
-            text(bits, stride, 60, 120, "PROCESSED PHOTOS", warm, 2);
-            text(bits, stride, 60, 165, "RETRO CLIPS  MJPEG / SILENT", warm, 2);
-            text(bits, stride, 60, 230, "FILES ARE STORED UNDER RETROLENS", accent, 1);
-            text(bits, stride, 60, 275, "PLAYBACK INDEX READY", warm, 1);
+            text(bits, stride, 60, 120, "SONY ORIGINALS REMAIN ENABLED", warm, 2);
+            text(bits, stride, 60, 165, "RETRO OUTPUTS DISABLED", warm, 2);
+            text(bits, stride, 60, 230, "STABILITY BUILD  PHOTO ONLY", accent, 1);
+            text(bits, stride, 60, 275, "NO EXTRA MEDIA WRITES", warm, 1);
         }
         if (compare_) {
             rect(bits, stride, 0, 42, 100, 24, panel, 80);
@@ -949,10 +1071,28 @@ class Runtime {
             rect(bits, stride, 510, 57, 12, 12, rgb565(235, 55, 48), 100);
             text(bits, stride, 532, 57, "REC 10 FPS", warm, 1);
         }
+        if (!retrolens::kRetroClipEnabled && featureMessageUntil_ > now) {
+            rect(bits, stride, 115, 190, 410, 90, panel, 95);
+            text(bits, stride, 158, 213, "RETRO CLIP DISABLED", accent, 2);
+            text(bits, stride, 160, 250, "STABILITY MODE  PHOTO ONLY", warm, 1);
+        }
         if (captureFlashUntil_ > now)
             rect(bits, stride, 0, 0, 640, 480, warm, 25);
-        ANativeWindow_unlockAndPost(win);
+        pthread_mutex_unlock(&mutex_);
+
+        int status = SURFACE_OK;
+        if (b.width <= 0 || b.height <= 0 || !b.bits) {
+            status = SURFACE_LOCK_FAILED;
+        } else if (!retrolens::blitRgb565(compose_, kSurfaceWidth, kSurfaceHeight, b.bits, b.width,
+                                          b.height, b.stride, b.format)) {
+            status = SURFACE_FORMAT_UNSUPPORTED;
+        }
+        int posted = ANativeWindow_unlockAndPost(win);
         ANativeWindow_release(win);
+        if (posted != 0 && status == SURFACE_OK)
+            status = SURFACE_POST_FAILED;
+        pthread_mutex_unlock(&renderMutex_);
+        return status;
     }
 };
 
@@ -982,11 +1122,12 @@ extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeDes
                                                                                      jlong h) {
     delete from(h);
 }
-extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeSetSurface(
+extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativeSetSurface(
     JNIEnv* env, jclass, jlong h, jobject surface) {
     Runtime* r = from(h);
     if (r && surface)
-        r->setSurface(ANativeWindow_fromSurface(env, surface));
+        return r->setSurface(ANativeWindow_fromSurface(env, surface));
+    return SURFACE_NO_WINDOW;
 }
 extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeClearSurface(JNIEnv*,
                                                                                           jclass,
@@ -1041,6 +1182,15 @@ Java_io_pihda_retrolens_NativeBridge_nativeToggleRecording(JNIEnv*, jclass, jlon
     Runtime* r = from(h);
     if (r)
         r->toggleRecording(ts);
+}
+extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeGetStats(
+    JNIEnv* env, jclass, jlong h, jintArray output) {
+    Runtime* r = from(h);
+    if (!r || !output || env->GetArrayLength(output) < 10)
+        return;
+    jint values[10];
+    r->getStats((int*)values, 10);
+    env->SetIntArrayRegion(output, 0, 10, values);
 }
 extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeStopRecording(
     JNIEnv*, jclass, jlong h, jboolean interrupted, jlong ts) {

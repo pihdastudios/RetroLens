@@ -2,7 +2,15 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_env.sh"
 
-"$SCRIPT_DIR/build.sh" --clean
+if [[ "${1:-}" == "--existing" ]]; then
+    shift
+elif [[ $# -eq 0 ]]; then
+    "$SCRIPT_DIR/build.sh" --clean
+else
+    echo "Usage: $0 [--existing]" >&2
+    exit 2
+fi
+[[ $# -eq 0 ]] || { echo "Usage: $0 [--existing]" >&2; exit 2; }
 apk="$(latest_apk)"
 release_dir="$PROJECT_DIR/releases"
 mkdir -p "$release_dir"

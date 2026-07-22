@@ -1,6 +1,8 @@
 # RetroLens
 
-RetroLens is a live retro-effects camera application for the Sony a5100 OpenMemories environment. It acquires Sony analytical-preview JPEGs with `CameraSequence`, decodes and processes them in native C++, composites a camera-oriented interface, preserves normal Sony still capture, writes a preview-resolution derivative, and can record the processed preview as a silent MJPEG AVI Retro Clip.
+RetroLens is a live retro-effects camera application for the Sony a5100 OpenMemories environment. It acquires Sony analytical-preview JPEGs with `CameraSequence`, decodes and processes them in native C++, composites a camera-oriented interface, and preserves normal Sony still capture.
+
+The current `stability-20260722-a` build intentionally disables Retro Clip and processed derivatives while the native display path is physically validated. Their implementation and host tests remain in the project, but the runtime does not start the recorder or request captured JPEG data.
 
 The project never modifies firmware, calibration data, boot partitions, or Sony originals.
 
@@ -9,7 +11,8 @@ The project never modifies firmware, calibration data, boot partitions, or Sony 
 - Host native tests and the API-10 APK build pass.
 - The package has installed successfully through Sony-PMCA-RE on an ILCE-5100.
 - CameraSequence itself was previously measured on this same camera in the source baseline at roughly 9–10 analytical JPEG frames per second.
-- The current RetroLens native surface, filters, derivative saving, and Retro Clip recording still require post-install physical operation and log review before they can be called hardware-tested.
+- Stability APK SHA-256 `f535468af3867b5139c0a6700b932fc3f1d0dc77c3d684ed0d6595cebb84d95c` builds and verifies. Final-install and physical validation are tracked in `DEVICE_FINDINGS.md`.
+- The current RetroLens native surface and filters still require post-install physical operation and log review before they can be called hardware-tested.
 - No screenshots have yet been captured from the physical camera.
 
 See `DEVICE_FINDINGS.md` for the exact evidence boundary.
@@ -22,17 +25,17 @@ CameraSequence worker -> one direct ByteBuffer -> bounded JNI copy
                                              |
                                              v
                          native process/render thread
-                         PicoJPEG -> 320x240 RGB -> preset graph
+                         PicoJPEG -> real 80x60 RGB sample grid
                                       |              |
-                                      |              +-> native RGB565 surface + UI
-                                      +-> one-slot recorder thread
-                                           +-> preview JPEG derivative
-                                           +-> silent MJPEG AVI
+                                      +-> fused preset graph
+                                      +-> event-driven 640x480 compositor
+                                           +-> native surface + UI
+                                           +-> Java-visible fallback on failure
 ```
 
 Java owns the Activity, Sony API calls, surfaces, physical keys, touch forwarding, one CameraSequence worker, and deterministic teardown. C++ owns JPEG decoding/encoding, filtering, temporal history, UI scenes, settings, snapshots, frame pacing, logging, and recording.
 
-The Java frame callback never allocates a bitmap or processes pixels. It reuses one 256 KiB direct buffer. JNI copies into one native slot and drops a frame when that slot is busy. Native memory is allocated once at startup.
+The Java frame callback never allocates a bitmap or processes pixels. It reuses one 256 KiB direct buffer. JNI copies into one native slot and drops a frame when that slot is busy. Native memory is allocated once at startup. Routine rendering happens only for a new camera frame or UI event rather than at an unrelated 30 FPS cadence.
 
 ## Toolchain
 
@@ -76,7 +79,7 @@ Installation requires the camera in a Sony-PMCA-RE compatible USB mode. `./scrip
 | Playback | RetroLens gallery scene |
 | Half shutter | Sony autofocus |
 | Full shutter | Sony capture, then processed preview derivative |
-| Movie | Start/stop Retro Clip |
+| Movie | Show Retro Clip disabled status in the stability build |
 | C1 | Hold original/effect compare |
 | Delete | Back/exit |
 
@@ -109,7 +112,7 @@ Thermal and infrared modes are simulated color mappings, not sensor measurements
 
 A full shutter press calls the verified Sony `takePicture(null,null,null)` path and releases it after the established guarded delay. The Sony original remains owned and saved by the camera.
 
-After a `CameraEx.JpegListener` callback, RetroLens writes the most recent filtered 320×240 analytical frame and a JSON sidecar:
+Processed derivative output is disabled in the stability build. The captured-JPEG listener is not registered, avoiding an additional multi-megabyte Java byte array after shutter. When the feature is re-enabled after validation, it will write a separate preview-resolution image and sidecar without modifying the Sony original:
 
 ```text
 RETROLENS/PHOTOS/<date>_<preset>_preview.jpg
@@ -122,7 +125,7 @@ This is explicitly a preview-resolution derivative. Full-resolution post-process
 
 ### Retro Clip
 
-Retro Clip records the processed analytical preview at 320×240, nominal 10 FPS, MJPEG in AVI 1.0, with no audio. It uses one recorder slot, one fixed encoded buffer, a fixed 9000-frame index, and a file-size/duration bound. Frames are dropped rather than queued when encoding is busy.
+Retro Clip is runtime-disabled in `stability-20260722-a`. Its bounded MJPEG/AVI implementation remains compiled and host-tested, but no recorder thread, recorder frame, or encode buffer is created and the movie key cannot start an output file.
 
 Files are written to `.tmp`, finalized with `idx1`, patched, flushed, and atomically renamed. Activity interruption produces a finalized filename ending in `.incomplete` and an `interrupted: true` sidecar rather than pretending the clip is complete.
 
@@ -140,9 +143,9 @@ RetroLens makes no full-HD baked-filter, H.264, audio, or encoder/ISP intercepti
 
 ## Performance and memory
 
-The source CameraSequence ceiling is approximately 10 FPS. Performance mode processes a 320×240 working image reconstructed from reduced JPEG block samples. The renderer scales to the 640×480 display. Balanced 480×360 and full 640×480 processing remain benchmark-gated because the proven full PicoJPEG decode was substantially slower.
+The source CameraSequence ceiling is approximately 10 FPS. PicoJPEG reduced mode contains one real color sample for each source 8×8 block, so the processing core now works directly on the unique 80×60 grid instead of filtering a 4× duplicated 320×240 image. Display-space scanlines, masks, vignette, UI, and scaling remain at 640×480.
 
-The performance controller monitors decode, filter, render, and dropped-frame measurements. It reduces animation/detail and target cadence before allowing interface stalls, without changing the selected preset.
+The performance controller monitors decode, filter, render, and dropped-frame measurements and controls accepted cadence. The renderer sleeps between new frames and UI animation deadlines. SIMD, handwritten assembly, OpenGL ES, and larger JPEG libraries remain deferred until device measurements prove the optimized integer path insufficient and confirm CPU capabilities.
 
 ## Storage and configuration
 
@@ -160,7 +163,7 @@ Settings are versioned and atomically replaced. Invalid values fall back to safe
 
 ## Troubleshooting
 
-- `Preview unavailable`: normal Sony capture should remain available; reconnect and inspect `RETROLENS/LOG.TXT`.
+- `PREVIEW FALLBACK`: the opaque effect surface has been removed so normal Sony preview and capture remain available. Record the visible `E` code and inspect `RETROLENS/LOG.TXT`.
 - No frames: verify the CameraSequence probe remains accepted at 640×480, format 256, one queued frame, and a 262144-byte JPEG maximum.
 - Build cannot find tools: run `./scripts/toolchain-info.sh`; this project expects the workspace `toolchain/` directory and JDK 8.
 - Install cannot find camera: set USB Connection to Mass Storage or leave it in app-install mode and run `./scripts/usb-status.sh`.

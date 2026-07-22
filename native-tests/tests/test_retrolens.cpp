@@ -50,6 +50,9 @@ static unsigned long checksum(const Pixel* pixels, int count) {
 }
 
 static void testCatalog() {
+    assert(kFrameWidth == 80 && kFrameHeight == 60);
+    assert(!kRetroClipEnabled);
+    assert(!kProcessedDerivativeEnabled);
     assert(presetCount() == 70);
     assert(!strcmp(presetAt(findPreset("piss_filter_2007")).name, "Piss Filter 2007"));
     const Preset& soviet = presetAt(findPreset("soviet_archive_1978"));
@@ -98,10 +101,33 @@ static void testDeterminismAndBayer() {
     processFrame(src, a, scratch, previous, 8, 8, p, 100, 77, 1000);
     processFrame(src, b, scratch, previous, 8, 8, p, 100, 77, 1000);
     assert(!memcmp(a, b, sizeof(a)));
+    memset(b, 0, sizeof(b));
+    processFrame(src, b, 0, previous, 8, 8, p, 100, 77, 1000);
+    assert(!memcmp(a, b, sizeof(a)));
     assert(checksum(a, 64) != checksum(src, 64));
     uint32_t s1 = 9, s2 = 9;
     for (int i = 0; i < 100; i++)
         assert(nextRandom(&s1) == nextRandom(&s2));
+}
+
+static void testSurfaceBlitBoundsAndFormats() {
+    const uint16_t source[4] = {0xf800, 0x07e0, 0x001f, 0xffff};
+    uint16_t rgb565[3 * 5 + 2];
+    for (int i = 0; i < 17; i++)
+        rgb565[i] = 0x55aa;
+    assert(blitRgb565(source, 2, 2, rgb565, 3, 5, 3, 4));
+    assert(rgb565[15] == 0x55aa && rgb565[16] == 0x55aa);
+    assert(rgb565[0] == 0xf800 && rgb565[2] == 0x07e0);
+    assert(rgb565[12] == 0x001f && rgb565[14] == 0xffff);
+
+    uint32_t rgba[5 * 3 + 2];
+    for (int i = 0; i < 17; i++)
+        rgba[i] = 0x12345678U;
+    assert(blitRgb565(source, 2, 2, rgba, 3, 5, 3, 1));
+    assert(rgba[15] == 0x12345678U && rgba[16] == 0x12345678U);
+    assert(rgba[0] == 0xff0000ffU);
+    assert(!blitRgb565(source, 2, 2, rgba, 3, 5, 2, 1));
+    assert(!blitRgb565(source, 2, 2, rgba, 3, 5, 3, 99));
 }
 
 static void testPerformanceController() {
@@ -180,6 +206,7 @@ int main() {
     testCatalog();
     testAllPresetsAndTinyImages();
     testDeterminismAndBayer();
+    testSurfaceBlitBoundsAndFormats();
     testPerformanceController();
     testJsonEscaping();
     testJpegAndAvi();

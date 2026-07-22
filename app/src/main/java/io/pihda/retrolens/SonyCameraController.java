@@ -38,16 +38,18 @@ public final class SonyCameraController implements SurfaceHolder.Callback {
     active = true;
     try {
       cameraEx = CameraEx.open(0, null);
-      cameraEx.setJpegListener(new CameraEx.JpegListener() {
-        @Override
-        public void onPictureTaken(byte[] data, CameraEx camera) {
-          if (!active)
-            return;
-          int bytes = data == null ? 0 : data.length;
-          Logger.info("Camera: captured JPEG callback bytes=" + bytes);
-          listener.onCapturedJpeg(bytes, android.os.SystemClock.elapsedRealtime());
-        }
-      });
+      if (NativeBridge.PROCESSED_DERIVATIVE_ENABLED) {
+        cameraEx.setJpegListener(new CameraEx.JpegListener() {
+          @Override
+          public void onPictureTaken(byte[] data, CameraEx camera) {
+            if (!active)
+              return;
+            int bytes = data == null ? 0 : data.length;
+            Logger.info("Camera: captured JPEG callback bytes=" + bytes);
+            listener.onCapturedJpeg(bytes, android.os.SystemClock.elapsedRealtime());
+          }
+        });
+      }
       Logger.info("Camera: CameraEx.open completed");
       startPreviewIfReady();
     } catch (Throwable throwable) {

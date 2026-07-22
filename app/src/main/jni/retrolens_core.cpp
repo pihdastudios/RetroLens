@@ -234,8 +234,9 @@ static int luma(const Pixel& p) {
 void processFrame(const Pixel* source, Pixel* output, Pixel* scratch, const Pixel* previous,
                   int width, int height, const Preset& preset, int intensity, uint32_t seed,
                   int64_t timestampMs) {
-    if (!source || !output || !scratch || width <= 0 || height <= 0)
+    if (!source || !output || width <= 0 || height <= 0)
         return;
+    (void)scratch;
     if (intensity < 0)
         intensity = 0;
     if (intensity > 100)
@@ -378,30 +379,6 @@ void processFrame(const Pixel* source, Pixel* output, Pixel* scratch, const Pixe
                 g = (g * (100 - mix) + old.g * mix) / 100;
                 b = (b * (100 - mix) + old.b * mix) / 100;
             }
-            if ((preset.flags & FX_SCANLINES) && (y & 1)) {
-                r = r * 68 / 100;
-                g = g * 68 / 100;
-                b = b * 68 / 100;
-            }
-            if ((preset.flags & FX_MASK) && ((x + y) % 3)) {
-                if (x % 3 == 0)
-                    g = g * 82 / 100;
-                else if (x % 3 == 1)
-                    b = b * 82 / 100;
-                else
-                    r = r * 82 / 100;
-            }
-            if (preset.flags & FX_VIGNETTE) {
-                int dx = (x * 2 - width), dy = (y * 2 - height);
-                int distance =
-                    (dx * dx * 100 / (width * width)) + (dy * dy * 100 / (height * height));
-                int shade = 100 - (distance > 40 ? (distance - 40) * amount / 180 : 0);
-                if (shade < 35)
-                    shade = 35;
-                r = r * shade / 100;
-                g = g * shade / 100;
-                b = b * shade / 100;
-            }
             if (preset.flags & FX_BLOOM) {
                 int lift = grey > 185 ? (grey - 185) * amount / 250 : 0;
                 r += lift;
@@ -415,12 +392,48 @@ void processFrame(const Pixel* source, Pixel* output, Pixel* scratch, const Pixe
                 g += n;
                 b += n;
             }
-            scratch[y * width + x].r = (uint8_t)clamp8(r);
-            scratch[y * width + x].g = (uint8_t)clamp8(g);
-            scratch[y * width + x].b = (uint8_t)clamp8(b);
+            output[y * width + x].r = (uint8_t)clamp8(r);
+            output[y * width + x].g = (uint8_t)clamp8(g);
+            output[y * width + x].b = (uint8_t)clamp8(b);
         }
     }
-    memcpy(output, scratch, (size_t)width * height * sizeof(Pixel));
+}
+
+bool blitRgb565(const uint16_t* source, int sourceWidth, int sourceHeight, void* destination,
+                int destinationWidth, int destinationHeight, int destinationStride,
+                int destinationFormat) {
+    if (!source || !destination || sourceWidth <= 0 || sourceHeight <= 0 || destinationWidth <= 0 ||
+        destinationHeight <= 0 || destinationStride < destinationWidth)
+        return false;
+    if (destinationFormat == 4) {
+        uint16_t* pixels = (uint16_t*)destination;
+        for (int y = 0; y < destinationHeight; y++) {
+            const uint16_t* sourceRow =
+                source + (y * sourceHeight / destinationHeight) * sourceWidth;
+            uint16_t* destinationRow = pixels + y * destinationStride;
+            for (int x = 0; x < destinationWidth; x++)
+                destinationRow[x] = sourceRow[x * sourceWidth / destinationWidth];
+        }
+        return true;
+    }
+    if (destinationFormat == 1 || destinationFormat == 2) {
+        uint32_t* pixels = (uint32_t*)destination;
+        for (int y = 0; y < destinationHeight; y++) {
+            const uint16_t* sourceRow =
+                source + (y * sourceHeight / destinationHeight) * sourceWidth;
+            uint32_t* destinationRow = pixels + y * destinationStride;
+            for (int x = 0; x < destinationWidth; x++) {
+                uint16_t color = sourceRow[x * sourceWidth / destinationWidth];
+                int red = ((color >> 11) & 31) * 255 / 31;
+                int green = ((color >> 5) & 63) * 255 / 63;
+                int blue = (color & 31) * 255 / 31;
+                destinationRow[x] =
+                    0xff000000U | ((uint32_t)blue << 16) | ((uint32_t)green << 8) | (uint32_t)red;
+            }
+        }
+        return true;
+    }
+    return false;
 }
 
 void jsonEscape(FILE* output, const char* value) {

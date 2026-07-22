@@ -1,5 +1,6 @@
 package io.pihda.retrolens;
 
+import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -20,6 +21,7 @@ public final class RetroLensActivity extends BaseActivity
   private SonyCameraController cameraController;
   private CameraSequenceFrameSource frameSource;
   private SurfaceView effectSurface;
+  private StartupStatusView startupStatus;
   private long nativeHandle;
   private boolean resumed;
   private Handler mainHandler;
@@ -33,12 +35,16 @@ public final class RetroLensActivity extends BaseActivity
     setContentView(R.layout.activity_retrolens);
     SurfaceView normal = (SurfaceView) findViewById(R.id.sonyPreviewSurface);
     effectSurface = (SurfaceView) findViewById(R.id.retroLensSurface);
+    startupStatus = (StartupStatusView) findViewById(R.id.startupStatus);
     effectSurface.setZOrderMediaOverlay(true);
+    effectSurface.getHolder().setFormat(PixelFormat.RGB_565);
     effectSurface.getHolder().addCallback(this);
     effectSurface.setOnTouchListener(this);
     mainHandler = new Handler();
     cameraController = new SonyCameraController(normal, this);
-    Logger.info("RetroLens: created model=" + Build.MODEL + " sdk=" + Build.VERSION.SDK_INT);
+    Logger.startSession(NativeBridge.BUILD_ID);
+    Logger.info("RetroLens: created model=" + Build.MODEL + " sdk=" + Build.VERSION.SDK_INT
+        + " abi=" + Build.CPU_ABI + " build=" + NativeBridge.BUILD_ID);
   }
 
   @Override
@@ -52,10 +58,12 @@ public final class RetroLensActivity extends BaseActivity
             Environment.getExternalStorageDirectory().getAbsolutePath(), Build.MODEL, "1.0.0");
       }
     }
-    mainHandler.removeCallbacksAndMessages(null);
-    if (nativeHandle != 0L && effectSurface.getHolder().getSurface().isValid()) {
-      NativeBridge.nativeSetSurface(nativeHandle, effectSurface.getHolder().getSurface());
+    if (nativeHandle == 0L) {
+      showNativeFallback("NATIVE ENGINE UNAVAILABLE");
     }
+    mainHandler.removeCallbacksAndMessages(null);
+    if (nativeHandle != 0L && effectSurface.getHolder().getSurface().isValid())
+      attachEffectSurface(effectSurface.getHolder());
     cameraController.start();
     Logger.info("RetroLens: resume complete nativeHandle=" + nativeHandle);
   }
@@ -74,22 +82,35 @@ public final class RetroLensActivity extends BaseActivity
     if (handle != 0L)
       NativeBridge.nativeStopRecording(handle, true, SystemClock.elapsedRealtime());
     if (source != null) {
-      if (!source.stopAndJoin(2500L)) {
+      source.requestSequenceStop();
+      boolean stopped = source.stopAndJoin(650L);
+      if (!stopped) {
+        Logger.error("RetroLens: frame worker exceeded first shutdown bound");
         source.requestSequenceStop();
-        source.stopAndJoin(1500L);
+        stopped = source.stopAndJoin(850L);
       }
-      source.release();
+      if (stopped)
+        source.release();
+      else
+        Logger.error("RetroLens: frame worker quarantined after shutdown timeout");
     }
     cameraController.stop();
     synchronized (lifecycleLock) {
       nativeHandle = 0L;
     }
     if (handle != 0L) {
+      int[] stats = new int[10];
+      NativeBridge.nativeGetStats(handle, stats);
+      Logger.info("RetroLens: final stats fps=" + stats[0] + " frames=" + stats[1]
+          + " dropped=" + stats[2] + " decodeMs=" + stats[3] + " filterMs=" + stats[4]
+          + " renderMs=" + stats[5] + " surface=" + stats[6] + "x" + stats[7]
+          + " format=" + stats[8] + " targetFps=" + stats[9]);
       NativeBridge.nativeClearSurface(handle);
       NativeBridge.nativeDestroy(handle);
     }
     setAutoPowerOffMode(true);
     Logger.info("RetroLens: pause release complete");
+    Logger.flush();
     super.onPause();
   }
 
@@ -113,9 +134,11 @@ public final class RetroLensActivity extends BaseActivity
   @Override
   public void onCapturedJpeg(int byteCount, long timestampMs) {
     savedGeneration = captureGeneration;
-    long handle = getHandle();
-    if (handle != 0L)
-      NativeBridge.nativeSaveSnapshot(handle, timestampMs);
+    if (NativeBridge.PROCESSED_DERIVATIVE_ENABLED) {
+      long handle = getHandle();
+      if (handle != 0L)
+        NativeBridge.nativeSaveSnapshot(handle, timestampMs);
+    }
   }
 
   @Override
@@ -142,15 +165,29 @@ public final class RetroLensActivity extends BaseActivity
 
   @Override
   public void surfaceCreated(SurfaceHolder holder) {
-    long handle = getHandle();
-    if (handle != 0L)
-      NativeBridge.nativeSetSurface(handle, holder.getSurface());
+    attachEffectSurface(holder);
   }
   @Override
   public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+    attachEffectSurface(holder);
+  }
+
+  private void attachEffectSurface(SurfaceHolder holder) {
     long handle = getHandle();
-    if (handle != 0L)
-      NativeBridge.nativeSetSurface(handle, holder.getSurface());
+    if (handle == 0L || holder == null || !holder.getSurface().isValid())
+      return;
+    int status = NativeBridge.nativeSetSurface(handle, holder.getSurface());
+    Logger.info("RetroLens: native surface probe status=" + status);
+    if (status == NativeBridge.SURFACE_OK) {
+      startupStatus.hideStatus();
+    } else {
+      showNativeFallback("DISPLAY FALLBACK  E" + status);
+    }
+  }
+
+  private void showNativeFallback(String detail) {
+    effectSurface.setVisibility(View.GONE);
+    startupStatus.showStatus("PREVIEW FALLBACK", detail + "  NORMAL CAPTURE AVAILABLE");
   }
   @Override
   public void surfaceDestroyed(SurfaceHolder holder) {
@@ -242,7 +279,7 @@ public final class RetroLensActivity extends BaseActivity
     if (handle != 0L)
       NativeBridge.nativeCaptureRequested(handle, SystemClock.elapsedRealtime());
     final int generation = ++captureGeneration;
-    if (cameraController.capture()) {
+    if (cameraController.capture() && NativeBridge.PROCESSED_DERIVATIVE_ENABLED) {
       mainHandler.postDelayed(new Runnable() {
         @Override
         public void run() {

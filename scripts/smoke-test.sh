@@ -27,6 +27,14 @@ grep -q 'APP_ABI := armeabi' "$PROJECT_DIR/app/src/main/jni/Application.mk"
 grep -q 'LOCAL_MODULE := retrolens' "$PROJECT_DIR/app/src/main/jni/Android.mk"
 grep -q 'P("piss_filter_2007"' "$PROJECT_DIR/app/src/main/jni/retrolens_core.cpp"
 grep -q 'P("soviet_archive_1978"' "$PROJECT_DIR/app/src/main/jni/retrolens_core.cpp"
+grep -q 'static const int kFrameWidth = 80' "$PROJECT_DIR/app/src/main/jni/retrolens_core.h"
+grep -q 'static const bool kRetroClipEnabled = false' "$PROJECT_DIR/app/src/main/jni/retrolens_core.h"
+grep -q 'static const bool kProcessedDerivativeEnabled = false' \
+    "$PROJECT_DIR/app/src/main/jni/retrolens_core.h"
+grep -q 'RETRO_CLIP_ENABLED = false' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'PROCESSED_DERIVATIVE_ENABLED = false' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 if grep -q 'android.permission.INTERNET' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then
     echo "RetroLens must not request Internet permission" >&2
     exit 1

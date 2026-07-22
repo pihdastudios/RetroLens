@@ -5,6 +5,15 @@ import java.nio.ByteBuffer;
 
 /** Narrow JNI boundary. Pixels, UI, persistence, and recording remain native. */
 public final class NativeBridge {
+  public static final String BUILD_ID = "stability-20260722-a";
+  public static final boolean RETRO_CLIP_ENABLED = false;
+  public static final boolean PROCESSED_DERIVATIVE_ENABLED = false;
+
+  public static final int SURFACE_OK = 0;
+  public static final int SURFACE_NO_WINDOW = 1;
+  public static final int SURFACE_LOCK_FAILED = 2;
+  public static final int SURFACE_FORMAT_UNSUPPORTED = 3;
+  public static final int SURFACE_POST_FAILED = 4;
   public static final int KEY_PREVIOUS = 1;
   public static final int KEY_NEXT = 2;
   public static final int KEY_UP = 3;
@@ -38,7 +47,7 @@ public final class NativeBridge {
   public static native long nativeCreate(
       String storageRoot, String cameraModel, String versionName);
   public static native void nativeDestroy(long handle);
-  public static native void nativeSetSurface(long handle, Surface surface);
+  public static native int nativeSetSurface(long handle, Surface surface);
   public static native void nativeClearSurface(long handle);
   public static native boolean nativeSubmitFrame(
       long handle, ByteBuffer jpeg, int length, long timestampMs);
@@ -50,4 +59,5 @@ public final class NativeBridge {
   public static native void nativeSaveSnapshot(long handle, long timestampMs);
   public static native void nativeToggleRecording(long handle, long timestampMs);
   public static native void nativeStopRecording(long handle, boolean interrupted, long timestampMs);
+  public static native void nativeGetStats(long handle, int[] output);
 }
