@@ -25,7 +25,7 @@ public final class StartupStatusView extends View {
   };
   private int mode = MODE_STARTING;
   private String title = "RETROLENS";
-  private String detail = "STARTING NATIVE DISPLAY PROBE";
+  private String detail = "STARTING NATIVE THREAD PROBE";
 
   public StartupStatusView(Context context, AttributeSet attributes) {
     super(context, attributes);
@@ -38,7 +38,7 @@ public final class StartupStatusView extends View {
     removeCallbacks(restoreReady);
     mode = MODE_STARTING;
     title = "RETROLENS";
-    detail = "STARTING NATIVE DISPLAY PROBE";
+    detail = "STARTING NATIVE THREAD PROBE";
     invalidate();
   }
 
@@ -78,7 +78,7 @@ public final class StartupStatusView extends View {
     canvas.drawText("RETROLENS", 20, 27, paint);
     paint.setTextSize(13.0f);
     paint.setColor(Color.rgb(66, 232, 188));
-    canvas.drawText("DISPLAY PROBE", width - 140, 26, paint);
+    canvas.drawText("THREAD PROBE", width - 140, 26, paint);
 
     if (mode == MODE_READY) {
       paint.setColor(Color.argb(155, 13, 17, 18));

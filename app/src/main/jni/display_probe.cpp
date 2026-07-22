@@ -37,16 +37,20 @@ static void pixel(uint16_t* pixels, int width, int height, int x, int y, uint16_
 
 static void rectangle(uint16_t* pixels, int width, int height, int left, int top, int right,
                       int bottom, uint16_t color) {
-    if (left < 0)
-        left = 0;
-    if (top < 0)
-        top = 0;
-    if (right > width)
-        right = width;
-    if (bottom > height)
-        bottom = height;
-    for (int y = top; y < bottom; y++)
-        for (int x = left; x < right; x++)
+    int64_t boundedLeft = left;
+    int64_t boundedTop = top;
+    int64_t boundedRight = right;
+    int64_t boundedBottom = bottom;
+    if (boundedLeft < 0)
+        boundedLeft = 0;
+    if (boundedTop < 0)
+        boundedTop = 0;
+    if (boundedRight > width)
+        boundedRight = width;
+    if (boundedBottom > height)
+        boundedBottom = height;
+    for (int y = (int)boundedTop; y < boundedBottom; y++)
+        for (int x = (int)boundedLeft; x < boundedRight; x++)
             pixels[y * width + x] = color;
 }
 
@@ -86,7 +90,7 @@ uint16_t probeRgb565(int red, int green, int blue) {
 }
 
 bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* buildId,
-                        int surfaceWidth, int surfaceHeight, int surfaceFormat) {
+                        int surfaceWidth, int surfaceHeight, int surfaceFormat, int frameNumber) {
     if (!pixels || width <= 0 || height <= 0)
         return false;
 
@@ -111,7 +115,12 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
              surfaceFormat);
     text(pixels, width, height, 10, 70, geometry, warm);
     text(pixels, width, height, 10, 91, buildId ? buildId : "UNKNOWN BUILD", warm);
-    text(pixels, width, height, 10, 118, "NO CAMERA SEQUENCE", accent);
+    char threadStatus[64];
+    snprintf(threadStatus, sizeof(threadStatus), "THREAD 8 FPS FRAME %d", frameNumber);
+    text(pixels, width, height, 10, 112, threadStatus, accent);
+    int sweepWidth = width > 20 ? width - 20 : 1;
+    int sweep = 10 + (int)(((unsigned int)frameNumber * 7U) % (unsigned int)sweepWidth);
+    rectangle(pixels, width, height, sweep, 128, sweep + 2, height - 4, warm);
 
     rectangle(pixels, width, height, 0, 0, width, 2, accent);
     rectangle(pixels, width, height, 0, height - 2, width, height, accent);

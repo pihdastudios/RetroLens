@@ -24,16 +24,16 @@ Those results came from the source WaveSnap/PMCADemo baseline. They justify the 
 - Static review found two concrete risks in the retired build: it forced high display color depth despite the proven camera apps using low depth, and it released `CameraEx` even after reporting that the CameraSequence worker had failed to stop. Its opaque second SurfaceView could also cover both normal preview and Java fallback after a successful initial surface probe followed by a later render failure.
 - Safety build `safe-preview-20260722-b`, APK SHA-256 `c71655c7f71dff4c107954fc09c1478494f3cc61fd2528b79c74b0015cc14b63`, passed both physical test phases. The user confirmed normal preview/capture and clean post-exit normal-camera operation. Six new originals (`DSC05026.JPG` through `DSC05031.JPG`) were confirmed on the card at regular intervals, and no `RETROLENS/` directory was created. No `Writing memory` wedge, persistent media LED, or battery removal recurred.
 - The proven safety APK is preserved as `releases/RetroLens-1.0.0-safe-preview.apk` with its checksum.
-- Native display probe `native-probe-20260722-c`, APK SHA-256 `cb7b6cd9658395e6e1d5c7ea98d1225a7a1cdb16e92762bce4ea3c49be99d87f`, adds a 256×144 synchronous native panel only. It retains no native window or pixel buffer after posting and creates no native worker, CameraSequence, full runtime, recorder, settings, or card output. Host tests and build verification pass; physical results are pending.
+- Native display probe `native-probe-20260722-c`, APK SHA-256 `cb7b6cd9658395e6e1d5c7ea98d1225a7a1cdb16e92762bce4ea3c49be99d87f`, showed the expected pattern and `NATIVE DISPLAY OK`. The user reports that all repeated lifecycle/capture phases passed. `DSC05032.JPG` is the only new original independently visible from the latest mounted-card inspection, so the repeated write sequence is user-confirmed rather than fully reconstructed from card timestamps.
+- Thread probe `thread-probe-20260722-d`, APK SHA-256 `9bdaddbcea606cf74c0b14b7f4b5aa966a733f2f0f48f9ea9366a578649fc4bb`, adds one fixed 256×144 RGB565 offscreen worker at 8 FPS. The worker owns no surface, camera API, JNI reference, file, or queue; one reusable Java runnable posts its latest raster synchronously. Twenty repeated worker lifecycle tests pass under ASan/UBSan and the full suite passes ThreadSanitizer. Build verification passes; physical results are pending.
 - The latest PMCADemo log showed many consecutive Boot/Exit receiver messages while navigating the Sony application menu. PMCADemo and LegacyAlphaRemote receiver behavior is being audited separately and has not been changed.
 
 ## Open hardware checks
 
-1. Confirm the native probe panel shows color bars, `NATIVE DISPLAY OK`, build ID, and actual surface geometry/format while normal Sony preview remains visible.
-2. Open and exit the probe five times without capture. After every exit, take one normal-camera photo and confirm writing completes normally.
+1. Confirm the probe panel sweep and frame counter animate near 8 FPS while normal Sony preview remains visible and responsive.
+2. Open and exit the thread probe five times without capture. After every exit, take one normal-camera photo and confirm writing completes normally.
 3. Take one photo inside RetroLens, wait for its media LED to stop, exit, then take one normal-camera photo and confirm writing completes normally.
 4. Verify autofocus, still capture, disabled Movie message, Delete/back exit, and application-menu responsiveness.
-5. Only after the probe passes may a later build test a bounded native render thread without CameraSequence.
-6. Only after the native thread passes may CameraSequence return, with strict worker quarantine and the same repeated exit test before filters.
+5. Only after the native thread passes may CameraSequence return, with strict worker quarantine and the same repeated exit test before filters.
 
 No item in this section may be promoted to “working on a5100” without `RETROLENS/LOG.TXT` evidence.

@@ -4,8 +4,7 @@
 #include <jni.h>
 #include <stdint.h>
 
-#include "display_probe.h"
-#include "retrolens_core.h"
+#include "display_probe_worker.h"
 
 namespace {
 
@@ -20,8 +19,10 @@ enum SurfaceStatus {
 static const uint32_t kProbeCookie = 0x52545042U;
 
 struct DisplayProbe {
-    DisplayProbe() : cookie(kProbeCookie) {}
+    DisplayProbe(const char* buildId, int intervalMs)
+        : cookie(kProbeCookie), worker(buildId, intervalMs) {}
     uint32_t cookie;
+    retrolens::DisplayProbeWorker worker;
 };
 
 static DisplayProbe* from(jlong handle) {
@@ -31,15 +32,23 @@ static DisplayProbe* from(jlong handle) {
 
 } // namespace
 
-extern "C" JNIEXPORT jlong JNICALL
-Java_io_pihda_retrolens_NativeBridge_nativeCreateDisplayProbe(JNIEnv*, jclass) {
-    DisplayProbe* probe = new DisplayProbe();
+extern "C" JNIEXPORT jlong JNICALL Java_io_pihda_retrolens_NativeBridge_nativeCreateDisplayProbe(
+    JNIEnv* env, jclass, jstring buildId, jint intervalMs) {
+    const char* build = buildId ? env->GetStringUTFChars(buildId, 0) : 0;
+    DisplayProbe* probe = new DisplayProbe(build, intervalMs);
+    if (build)
+        env->ReleaseStringUTFChars(buildId, build);
+    if (!probe->worker.start()) {
+        delete probe;
+        return 0;
+    }
     return (jlong)(intptr_t)probe;
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativePostDisplayProbe(
-    JNIEnv* env, jclass, jlong handle, jobject surface, jstring buildId) {
-    if (!from(handle) || !surface)
+    JNIEnv* env, jclass, jlong handle, jobject surface) {
+    DisplayProbe* probe = from(handle);
+    if (!probe || !surface)
         return SURFACE_NO_WINDOW;
 
     ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
@@ -54,27 +63,22 @@ extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativePos
         return SURFACE_LOCK_FAILED;
     }
 
-    uint16_t pixels[retrolens::kDisplayProbeWidth * retrolens::kDisplayProbeHeight];
-    const char* build = buildId ? env->GetStringUTFChars(buildId, 0) : 0;
-    bool rendered = retrolens::renderDisplayProbe(pixels, retrolens::kDisplayProbeWidth,
-                                                  retrolens::kDisplayProbeHeight, build,
-                                                  buffer.width, buffer.height, buffer.format);
-    if (build)
-        env->ReleaseStringUTFChars(buildId, build);
-
     int status = SURFACE_OK;
-    if (!rendered || buffer.width <= 0 || buffer.height <= 0 || !buffer.bits) {
+    int frameNumber = 0;
+    if (buffer.width <= 0 || buffer.height <= 0 || !buffer.bits) {
         status = SURFACE_LOCK_FAILED;
-    } else if (!retrolens::blitRgb565(pixels, retrolens::kDisplayProbeWidth,
-                                      retrolens::kDisplayProbeHeight, buffer.bits, buffer.width,
-                                      buffer.height, buffer.stride, buffer.format)) {
-        status = SURFACE_FORMAT_UNSUPPORTED;
+    } else {
+        probe->worker.updateSurfaceInfo(buffer.width, buffer.height, buffer.format);
+        if (!probe->worker.blitLatest(buffer.bits, buffer.width, buffer.height, buffer.stride,
+                                      buffer.format, &frameNumber))
+            status = SURFACE_FORMAT_UNSUPPORTED;
     }
     int postResult = ANativeWindow_unlockAndPost(window);
     __android_log_print(ANDROID_LOG_INFO, "RetroLens",
-                        "DisplayProbe: status=%d geometry=%d surface=%dx%d stride=%d format=%d",
+                        "DisplayProbe: status=%d geometry=%d surface=%dx%d stride=%d format=%d "
+                        "frame=%d",
                         status, geometryResult, buffer.width, buffer.height, buffer.stride,
-                        buffer.format);
+                        buffer.format, frameNumber);
     ANativeWindow_release(window);
     if (postResult != 0 && status == SURFACE_OK)
         status = SURFACE_POST_FAILED;
@@ -86,11 +90,20 @@ Java_io_pihda_retrolens_NativeBridge_nativeClearDisplayProbe(JNIEnv*, jclass, jl
     (void)from(handle);
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_io_pihda_retrolens_NativeBridge_nativeDestroyDisplayProbe(JNIEnv*, jclass, jlong handle) {
+extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativeDestroyDisplayProbe(
+    JNIEnv* env, jclass, jlong handle, jintArray stats) {
     DisplayProbe* probe = from(handle);
     if (!probe)
-        return;
+        return -1;
+    int frameCount = 0;
+    int postCount = 0;
+    probe->worker.getStats(&frameCount, &postCount);
+    int stopMs = probe->worker.stop();
+    if (stats && env->GetArrayLength(stats) >= 3) {
+        jint values[3] = {frameCount, postCount, stopMs};
+        env->SetIntArrayRegion(stats, 0, 3, values);
+    }
     probe->cookie = 0;
     delete probe;
+    return stopMs;
 }

@@ -2,7 +2,7 @@ LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := retrolens
-LOCAL_SRC_FILES := retrolens_runtime.cpp retrolens_core.cpp display_probe.cpp display_probe_jni.cpp jpeg_encoder.cpp third_party/picojpeg/picojpeg.c
+LOCAL_SRC_FILES := retrolens_runtime.cpp retrolens_core.cpp display_probe.cpp display_probe_worker.cpp display_probe_jni.cpp jpeg_encoder.cpp third_party/picojpeg/picojpeg.c
 LOCAL_C_INCLUDES := $(LOCAL_PATH) $(LOCAL_PATH)/third_party/picojpeg
 LOCAL_ARM_MODE := arm
 LOCAL_CFLAGS := -O3 -fomit-frame-pointer -ffunction-sections -fdata-sections -Wall

@@ -39,6 +39,8 @@ grep -q 'SAFE_BASELINE_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'DISPLAY_PROBE_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'DISPLAY_PROBE_THREAD_ENABLED = true' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'ANALYTICAL_PREVIEW_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'NATIVE_OUTPUT_ENABLED = false' \
@@ -46,7 +48,8 @@ grep -q 'NATIVE_OUTPUT_ENABLED = false' \
 grep -q 'EXTERNAL_LOGGING_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
 grep -q 'nativeProbeSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
-grep -q 'display_probe.cpp display_probe_jni.cpp' "$PROJECT_DIR/app/src/main/jni/Android.mk"
+grep -q 'display_probe.cpp display_probe_worker.cpp display_probe_jni.cpp' \
+    "$PROJECT_DIR/app/src/main/jni/Android.mk"
 if grep -q 'retroLensSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"; then
     echo "Display probe must not restore the full native output surface" >&2
     exit 1
@@ -68,7 +71,19 @@ if grep -q 'nativeCreate(' \
 fi
 if grep -Eq 'CameraSequence|Environment|getExternalStorageDirectory|new Thread' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"; then
-    echo "Display probe must remain synchronous and storage-free" >&2
+    echo "Thread probe must not add a Java worker or storage access" >&2
+    exit 1
+fi
+grep -q 'FRAME_INTERVAL_MS = 125' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"
+if [[ $(grep -c 'new Runnable' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java") -ne 1 ]]; then
+    echo "Thread probe must use exactly one reusable Java cadence runnable" >&2
+    exit 1
+fi
+if grep -Eq 'ANativeWindow|CameraSequence|fopen|mkdir' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"; then
+    echo "Offscreen probe worker must not own surfaces, camera APIs, or files" >&2
     exit 1
 fi
 if grep -q 'android.permission.INTERNET' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then

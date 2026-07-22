@@ -1,4 +1,5 @@
 #include "display_probe.h"
+#include "display_probe_worker.h"
 #include "jpeg_encoder.h"
 #include "retrolens_core.h"
 #include "third_party/picojpeg/picojpeg.h"
@@ -144,7 +145,7 @@ static void testDisplayProbeRaster() {
     uint16_t guarded[2 + 13 * 9 + 2];
     for (int index = 0; index < (int)(sizeof(guarded) / sizeof(guarded[0])); index++)
         guarded[index] = 0x55aa;
-    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4));
+    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4, 7));
     assert(guarded[0] == 0x55aa && guarded[1] == 0x55aa);
     assert(guarded[2 + 13 * 9] == 0x55aa && guarded[2 + 13 * 9 + 1] == 0x55aa);
     assert(checksum16(guarded + 2, 13 * 9) != 0);
@@ -152,14 +153,53 @@ static void testDisplayProbeRaster() {
     uint16_t first[kDisplayProbeWidth * kDisplayProbeHeight];
     uint16_t second[kDisplayProbeWidth * kDisplayProbeHeight];
     assert(renderDisplayProbe(first, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4));
+                              256, 144, 4, 11));
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4));
+                              256, 144, 4, 11));
     assert(!memcmp(first, second, sizeof(first)));
     assert(checksum16(first, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
     assert(first[0] == probeRgb565(66, 232, 188));
-    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4));
-    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4));
+    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4, 0));
+    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4, 0));
+
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
+                              256, 144, 4, 12));
+    assert(memcmp(first, second, sizeof(first)) != 0);
+}
+
+static void testDisplayProbeWorkerLifecycle() {
+    for (int cycle = 0; cycle < 20; cycle++) {
+        DisplayProbeWorker worker("host-thread-probe", 2);
+        assert(worker.start());
+        assert(worker.start());
+        assert(worker.waitForFrame(3, 250));
+        worker.updateSurfaceInfo(17, 11, 4);
+
+        uint16_t destination[17 * 11 + 2];
+        for (int index = 0; index < 17 * 11 + 2; index++)
+            destination[index] = 0x55aa;
+        int postedFrame = 0;
+        assert(worker.blitLatest(destination, 17, 11, 17, 4, &postedFrame));
+        assert(postedFrame >= 3);
+        assert(destination[17 * 11] == 0x55aa && destination[17 * 11 + 1] == 0x55aa);
+
+        int framesBeforeStop = 0;
+        int postsBeforeStop = 0;
+        worker.getStats(&framesBeforeStop, &postsBeforeStop);
+        assert(framesBeforeStop >= 3 && postsBeforeStop == 1);
+        int stopMs = worker.stop();
+        assert(stopMs >= 0 && stopMs <= 250);
+        assert(worker.stop() == 0);
+        int framesAfterStop = 0;
+        int postsAfterStop = 0;
+        worker.getStats(&framesAfterStop, &postsAfterStop);
+        assert(framesAfterStop >= framesBeforeStop);
+        assert(postsAfterStop == postsBeforeStop);
+        int stableFrames = 0;
+        int stablePosts = 0;
+        worker.getStats(&stableFrames, &stablePosts);
+        assert(stableFrames == framesAfterStop && stablePosts == postsAfterStop);
+    }
 }
 
 static void testPerformanceController() {
@@ -240,6 +280,7 @@ int main() {
     testDeterminismAndBayer();
     testSurfaceBlitBoundsAndFormats();
     testDisplayProbeRaster();
+    testDisplayProbeWorkerLifecycle();
     testPerformanceController();
     testJsonEscaping();
     testJpegAndAvi();

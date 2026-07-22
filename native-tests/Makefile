@@ -1,10 +1,10 @@
 CXX ?= g++
-CXXFLAGS ?= -O1 -g -std=c++98 -Wall -Wextra -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer
-LDFLAGS ?= -fsanitize=address,undefined
+CXXFLAGS ?= -O1 -g -std=c++98 -Wall -Wextra -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -pthread
+LDFLAGS ?= -fsanitize=address,undefined -pthread
 ROOT := ..
 JNI := $(ROOT)/app/src/main/jni
 TARGET := build/retrolens_tests
-SOURCES := tests/test_retrolens.cpp $(JNI)/retrolens_core.cpp $(JNI)/display_probe.cpp $(JNI)/jpeg_encoder.cpp $(JNI)/third_party/picojpeg/picojpeg.c
+SOURCES := tests/test_retrolens.cpp $(JNI)/retrolens_core.cpp $(JNI)/display_probe.cpp $(JNI)/display_probe_worker.cpp $(JNI)/jpeg_encoder.cpp $(JNI)/third_party/picojpeg/picojpeg.c
 
 .PHONY: all test clean
 all: $(TARGET)

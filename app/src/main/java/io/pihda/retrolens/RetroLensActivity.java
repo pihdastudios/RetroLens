@@ -26,7 +26,7 @@ public final class RetroLensActivity extends BaseActivity
         (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this);
     mainHandler = new Handler();
     Logger.startSession(NativeBridge.BUILD_ID);
-    Logger.info("RetroLens: native display probe created model=" + Build.MODEL + " sdk="
+    Logger.info("RetroLens: native thread probe created model=" + Build.MODEL + " sdk="
         + Build.VERSION.SDK_INT + " abi=" + Build.CPU_ABI + " build=" + NativeBridge.BUILD_ID);
   }
 
@@ -37,18 +37,18 @@ public final class RetroLensActivity extends BaseActivity
     setAutoPowerOffMode(false);
     statusView.showStarting();
     cameraController.start();
-    Logger.info("RetroLens: native display probe resume complete");
+    Logger.info("RetroLens: native thread probe resume complete");
   }
 
   @Override
   protected void onPause() {
-    Logger.info("RetroLens: native display probe pause begin");
+    Logger.info("RetroLens: native thread probe pause begin");
     resumed = false;
     mainHandler.removeCallbacksAndMessages(null);
     displayProbeController.stop();
     cameraController.stop();
     setAutoPowerOffMode(true);
-    Logger.info("RetroLens: native display probe pause release complete");
+    Logger.info("RetroLens: native thread probe pause release complete");
     Logger.flush();
     super.onPause();
   }
@@ -67,7 +67,7 @@ public final class RetroLensActivity extends BaseActivity
     if (!resumed)
       return;
     if (status == NativeBridge.SURFACE_OK) {
-      statusView.showTransient("NATIVE DISPLAY OK", "NORMAL PREVIEW ACTIVE", 1200L);
+      statusView.showTransient("NATIVE THREAD OK", "8 FPS  NORMAL PREVIEW ACTIVE", 1200L);
     } else {
       statusView.showError("NATIVE PROBE FAILED  E" + status, "SONY PREVIEW REMAINS ACTIVE");
     }
