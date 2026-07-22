@@ -224,8 +224,8 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
             snprintf(line, sizeof(line), "SAVE %d FAIL %d", filter.photoSavedCount,
                      filter.photoFailedCount);
             text(pixels, width, height, 3, 63, line, warm);
-            snprintf(line, sizeof(line), "CARD S%d W%d E%d", filter.photoStorageState,
-                     filter.photoWriteStage, filter.photoWriteError);
+            snprintf(line, sizeof(line), "CARD J%d S%d W%d E%d", filter.photoStorageAttempts,
+                     filter.photoStorageState, filter.photoWriteStage, filter.photoWriteError);
             text(pixels, width, height, 3, 78, line,
                  filter.photoStorageState == 1 || filter.photoStorageState == 7
                      ? accent

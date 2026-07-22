@@ -11,12 +11,14 @@ import java.nio.ByteBuffer;
 /** Photo-only RetroLens runtime with bounded analytical preview and derivative output. */
 public final class RetroLensActivity extends BaseActivity
     implements SonyCameraController.Listener, NativeDisplayProbeController.Listener,
-               CameraSequenceFrameSource.Listener, CameraSequenceFrameSource.FrameConsumer {
+               CameraSequenceFrameSource.Listener, CameraSequenceFrameSource.FrameConsumer,
+               StorageProbeWorker.Listener {
   private SonyCameraController cameraController;
   private NativeDisplayProbeController displayProbeController;
   private volatile CameraSequenceFrameSource frameSource;
   private StartupStatusView statusView;
   private Handler mainHandler;
+  private StorageProbeWorker storageProbeWorker;
   private CameraEx readyCamera;
   private volatile boolean resumed;
   private boolean nativeRuntimeReady;
@@ -75,8 +77,11 @@ public final class RetroLensActivity extends BaseActivity
     statusView.showStarting();
     File external = Environment.getExternalStorageDirectory();
     String storageRoot = external == null ? "" : external.getAbsoluteFile().getAbsolutePath();
-    Logger.configureRoot(storageRoot);
+    Logger.configureRoot("");
     displayProbeController.configureStorageRoot(storageRoot);
+    StorageProbeWorker worker = new StorageProbeWorker(mainHandler, this);
+    storageProbeWorker = worker;
+    worker.start();
     cameraController.start();
     mainHandler.postDelayed(startupFallback, STARTUP_FALLBACK_MS);
     Logger.info("RetroLens: photo runtime resume complete");
@@ -87,6 +92,10 @@ public final class RetroLensActivity extends BaseActivity
     Logger.info("RetroLens: photo runtime pause begin");
     resumed = false;
     mainHandler.removeCallbacksAndMessages(null);
+    StorageProbeWorker storageWorker = storageProbeWorker;
+    storageProbeWorker = null;
+    if (storageWorker != null && !storageWorker.stopAndJoin(750L))
+      Logger.error("Storage: worker did not stop within 750 ms; callbacks detached");
     readyCamera = null;
     CameraSequenceFrameSource source = frameSource;
     frameSource = null;
@@ -112,6 +121,16 @@ public final class RetroLensActivity extends BaseActivity
     readyCamera = cameraEx;
     startRuntimeIfReady();
     Logger.info("RetroLens: Sony normal preview ready");
+  }
+
+  @Override
+  public void onStorageProbeComplete(
+      StorageProbeWorker worker, StorageController.Result result, int attempts) {
+    if (!resumed || worker == null || worker != storageProbeWorker)
+      return;
+    displayProbeController.completeStorageProbe(result, attempts);
+    Logger.info("RetroLens: storage gate complete status=" + result.status + " attempts=" + attempts
+        + " root=" + result.root + " detail=" + result.detail);
   }
 
   @Override

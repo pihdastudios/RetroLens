@@ -153,6 +153,15 @@ extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeSet
         probe->worker.setFocus(active == JNI_TRUE);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_io_pihda_retrolens_NativeBridge_nativeConfigureDisplayProbeStorage(JNIEnv*, jclass,
+                                                                        jlong handle, jint status,
+                                                                        jint attempts) {
+    DisplayProbe* probe = from(handle);
+    if (probe)
+        probe->worker.configureStorage(status, attempts);
+}
+
 extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeGetDisplayProbeStats(
     JNIEnv* env, jclass, jlong handle, jintArray output) {
     DisplayProbe* probe = from(handle);

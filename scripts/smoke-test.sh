@@ -67,6 +67,12 @@ grep -q 'storageRoot, storageStatus, Build.MODEL' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"
 grep -q 'STARTUP_FALLBACK_MS = 800L' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'new StorageProbeWorker' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'RETRY_DELAYS_MS = {0L, 250L, 750L, 1500L, 3000L}' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StorageProbeWorker.java"
+grep -q 'StorageController.probe' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StorageProbeWorker.java"
 grep -q 'setVisibility(GONE)' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StartupStatusView.java"
 grep -q 'onNativeRuntimeReady' \
@@ -133,6 +139,10 @@ grep -q 'nativeChangeDisplayProbeStyle' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'nativeRequestDisplayProbePhoto' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'nativeConfigureDisplayProbeStorage' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'nativeConfigureDisplayProbeStorage' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_jni.cpp"
 grep -q 'displayProbeController.submitJpeg' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
 grep -q 'displayProbeController.requestPhoto()' \
@@ -177,6 +187,8 @@ grep -q 'kPhotoWidth = 320' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
 grep -q 'kPhotoHeight = 240' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
 grep -q 'savePhoto' "$PROJECT_DIR/app/src/main/jni/photo_store.cpp"
 grep -q 'waitForStorageInitialization' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
+grep -q 'while (photoRunning_ && !storageConfigured_)' \
     "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
 if [[ $(grep -c 'photoStore_\.initialize()' \
     "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp") -ne 1 ]]; then

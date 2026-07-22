@@ -9,6 +9,7 @@ import java.io.IOException;
 
 /** Verifies the exact removable-storage tree used by Java and native photo output. */
 public final class StorageController {
+  public static final int INITIALIZING = 0;
   public static final int READY = 1;
   public static final int ROOT_UNAVAILABLE = 2;
   public static final int DIRECTORY_FAILED = 3;
@@ -45,10 +46,12 @@ public final class StorageController {
     File config = new File(base, "CONFIG");
     File photos = new File(base, "PHOTOS");
     File thumbnails = new File(base, "THUMBNAILS");
-    if (!ensureDirectory(base) || !ensureDirectory(config) || !ensureDirectory(photos)
-        || !ensureDirectory(thumbnails)) {
+    File[] directories = {base, config, photos, thumbnails};
+    for (int index = 0; index < directories.length; index++) {
+      if (ensureDirectory(directories[index]))
+        continue;
       return failure(DIRECTORY_FAILED, root.getAbsolutePath(), availableBytes(root),
-          "could not create RETROLENS output tree");
+          "could not create " + directories[index].getAbsolutePath());
     }
     File temporary = new File(config, "storage_probe.tmp");
     File completed = new File(config, "storage_probe.ok");

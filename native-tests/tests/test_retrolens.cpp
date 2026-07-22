@@ -419,16 +419,20 @@ static void testReducedDecodeAndBoundedWorker() {
 
     char photoRoot[] = "/tmp/retrolens-worker-photo-XXXXXX";
     assert(mkdtemp(photoRoot));
-    DisplayProbeWorker* photoWorker =
-        new DisplayProbeWorker("host-photo-runtime", 8, photoRoot, "HOST", "test");
+    DisplayProbeWorker* photoWorker = new DisplayProbeWorker(
+        "host-photo-runtime", 8, photoRoot, "HOST", "test", kStorageProbeInitializing);
     assert(photoWorker->start());
-    assert(photoWorker->waitForStorageInitialization(1000));
+    assert(!photoWorker->waitForStorageInitialization(20));
     assert(photoWorker->submitJpeg(encoded, (int)size, 6000) == kFilterSubmitAccepted);
     assert(photoWorker->waitForProcessedFrame(1, 1000));
+    assert(photoWorker->requestPhoto(6100) == kPhotoRequestUnavailable);
+    photoWorker->configureStorage(kStorageProbeReady, 3);
+    assert(photoWorker->waitForStorageInitialization(1000));
     assert(photoWorker->requestPhoto(6123) == kPhotoRequestQueued);
     assert(photoWorker->waitForPhotoResult(1, 3000));
     photoWorker->getFilterStats(&metrics);
     assert(metrics.photoSavedCount == 1 && metrics.photoFailedCount == 0);
+    assert(metrics.photoStorageAttempts == 3);
     assert(metrics.photoEncodedBytes > 100);
     assert(metrics.galleryPhotoCount == 1);
     assert(metrics.galleryHasThumbnail && metrics.galleryIndex == 0);
@@ -465,16 +469,26 @@ static void testReducedDecodeAndBoundedWorker() {
     rmdir(cleanup);
     rmdir(photoRoot);
 
-    DisplayProbeWorker unavailableWorker("host-storage-failure", 8, "", "HOST", "test", 4);
+    DisplayProbeWorker unavailableWorker("host-storage-failure", 8, "", "HOST", "test",
+                                         kStorageProbeInitializing);
     assert(unavailableWorker.start());
+    assert(!unavailableWorker.waitForStorageInitialization(20));
+    unavailableWorker.configureStorage(kStorageProbeWriteFailed, 5);
     assert(unavailableWorker.waitForStorageInitialization(1000));
     assert(unavailableWorker.submitJpeg(encoded, (int)size, 7000) == kFilterSubmitAccepted);
     assert(unavailableWorker.waitForProcessedFrame(1, 1000));
     assert(unavailableWorker.requestPhoto(7123) == kPhotoRequestUnavailable);
     unavailableWorker.getFilterStats(&metrics);
     assert(metrics.photoStorageState == kPhotoStorageWriteProbeFailed);
+    assert(metrics.photoStorageAttempts == 5);
     assert(metrics.photoSavedCount == 0 && metrics.photoFailedCount == 0);
     assert(unavailableWorker.stop() <= 250);
+
+    DisplayProbeWorker pendingWorker("host-storage-pending", 8, "", "HOST", "test",
+                                     kStorageProbeInitializing);
+    assert(pendingWorker.start());
+    assert(!pendingWorker.waitForStorageInitialization(20));
+    assert(pendingWorker.stop() <= 250);
     delete[] encoded;
 }
 

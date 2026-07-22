@@ -34,7 +34,8 @@ public final class NativeDisplayProbeController
   private final int[] finalStats = new int[3];
   private final int[] runtimeStats = new int[12];
   private String storageRoot = "";
-  private int storageStatus = StorageController.ROOT_UNAVAILABLE;
+  private int storageStatus = StorageController.INITIALIZING;
+  private int storageAttempts;
   private final Runnable animationTick = new Runnable() {
     @Override
     public void run() {
@@ -78,8 +79,16 @@ public final class NativeDisplayProbeController
     if (handle != 0L)
       return;
     storageRoot = root == null ? "" : root;
-    storageStatus =
-        storageRoot.length() == 0 ? StorageController.ROOT_UNAVAILABLE : StorageController.READY;
+    storageStatus = StorageController.INITIALIZING;
+    storageAttempts = 0;
+  }
+
+  public synchronized void completeStorageProbe(StorageController.Result result, int attempts) {
+    storageStatus = result == null ? StorageController.ROOT_UNAVAILABLE : result.status;
+    storageAttempts = attempts;
+    long probe = handle;
+    if (probe != 0L)
+      NativeBridge.nativeConfigureDisplayProbeStorage(probe, storageStatus, storageAttempts);
   }
 
   public synchronized void start() {
@@ -104,6 +113,8 @@ public final class NativeDisplayProbeController
       return;
     }
     holder.addCallback(this);
+    if (storageStatus != StorageController.INITIALIZING)
+      NativeBridge.nativeConfigureDisplayProbeStorage(handle, storageStatus, storageAttempts);
     listener.onNativeRuntimeReady();
     scheduleStats();
   }

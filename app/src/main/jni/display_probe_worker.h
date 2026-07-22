@@ -24,6 +24,15 @@ enum PhotoRequestStatus {
     kPhotoRequestUnavailable = 2
 };
 
+enum StorageProbeStatus {
+    kStorageProbeInitializing = 0,
+    kStorageProbeReady = 1,
+    kStorageProbeRootUnavailable = 2,
+    kStorageProbeDirectoryFailed = 3,
+    kStorageProbeWriteFailed = 4,
+    kStorageProbeInsufficientSpace = 5
+};
+
 enum PhotoWriteState {
     kPhotoWriteIdle = 0,
     kPhotoWriteSaving = 1,
@@ -56,7 +65,7 @@ class DisplayProbeWorker {
   public:
     DisplayProbeWorker(const char* buildId, int intervalMs, const char* storageRoot,
                        const char* cameraModel, const char* versionName,
-                       int storageStatus = kPhotoStorageReady);
+                       int storageStatus = kStorageProbeReady);
     ~DisplayProbeWorker();
     bool start();
     int stop();
@@ -69,6 +78,7 @@ class DisplayProbeWorker {
     void touch(int action, float x, float y, int64_t timestampMs);
     int requestPhoto(int64_t timestampMs);
     void setFocus(bool active);
+    void configureStorage(int status, int attempts);
     bool blitLatest(void* destination, int width, int height, int stride, int format,
                     int* frameNumber);
     bool waitForFrame(int minimumFrame, int timeoutMs);
@@ -104,6 +114,7 @@ class DisplayProbeWorker {
     bool threadStarted_;
     bool photoRunning_;
     bool photoThreadStarted_;
+    bool storageConfigured_;
     bool storageInitializationComplete_;
     int initialStorageStatus_;
     int intervalMs_;

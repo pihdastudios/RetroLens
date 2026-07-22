@@ -81,6 +81,7 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
                                        const char* cameraModel, const char* versionName,
                                        int storageStatus)
     : running_(false), threadStarted_(false), photoRunning_(false), photoThreadStarted_(false),
+      storageConfigured_(storageStatus != kStorageProbeInitializing),
       storageInitializationComplete_(false), initialStorageStatus_(storageStatus),
       intervalMs_(intervalMs), frameCount_(0), postCount_(0), surfaceWidth_(0), surfaceHeight_(0),
       surfaceFormat_(0), inputPending_(false), inputInUse_(false), hasPrevious_(false),
@@ -120,6 +121,7 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
     filterMetrics_.diagnostics = diagnostics_;
     filterMetrics_.favorite = isFavoriteLocked(selectedStyle_);
     filterMetrics_.photoStorageState = kPhotoStorageInitializing;
+    filterMetrics_.photoStorageAttempts = 0;
     filterMetrics_.photoWriteStage = kPhotoStageNone;
     filterMetrics_.photoWriteError = 0;
     filterMetrics_.photoFreeMiB = -1;
@@ -459,6 +461,20 @@ void DisplayProbeWorker::setFocus(bool active) {
     pthread_mutex_unlock(&mutex_);
 }
 
+void DisplayProbeWorker::configureStorage(int status, int attempts) {
+    pthread_mutex_lock(&photoMutex_);
+    if (!storageConfigured_) {
+        initialStorageStatus_ = status;
+        storageConfigured_ = status != kStorageProbeInitializing;
+        pthread_cond_broadcast(&photoCondition_);
+    }
+    pthread_mutex_unlock(&photoMutex_);
+    pthread_mutex_lock(&mutex_);
+    filterMetrics_.photoStorageAttempts = attempts < 0 ? 0 : attempts;
+    pthread_cond_broadcast(&condition_);
+    pthread_mutex_unlock(&mutex_);
+}
+
 bool DisplayProbeWorker::blitLatest(void* destination, int width, int height, int stride,
                                     int format, int* frameNumber) {
     pthread_mutex_lock(&mutex_);
@@ -555,18 +571,29 @@ void* DisplayProbeWorker::photoThreadEntry(void* context) {
 }
 
 void DisplayProbeWorker::photoRun() {
+    pthread_mutex_lock(&photoMutex_);
+    while (photoRunning_ && !storageConfigured_)
+        pthread_cond_wait(&photoCondition_, &photoMutex_);
+    if (!photoRunning_) {
+        pthread_mutex_unlock(&photoMutex_);
+        return;
+    }
+    int configuredStatus = initialStorageStatus_;
+    pthread_mutex_unlock(&photoMutex_);
+
     RuntimeSettings settings;
     bool loadedSettings = false;
-    PhotoStorageState storageState = photoStore_.initialize();
-    if (storageState == kPhotoStorageReady)
-        loadedSettings = photoStore_.loadSettings(&settings);
-    if (storageState != kPhotoStorageReady) {
-        if (initialStorageStatus_ == 3)
-            storageState = kPhotoStorageDirectoryFailed;
-        else if (initialStorageStatus_ == 4)
-            storageState = kPhotoStorageWriteProbeFailed;
-        else if (initialStorageStatus_ == 5)
-            storageState = kPhotoStorageInsufficientSpace;
+    PhotoStorageState storageState = kPhotoStorageInvalidRoot;
+    if (configuredStatus == kStorageProbeReady) {
+        storageState = photoStore_.initialize();
+        if (storageState == kPhotoStorageReady)
+            loadedSettings = photoStore_.loadSettings(&settings);
+    } else if (configuredStatus == kStorageProbeDirectoryFailed) {
+        storageState = kPhotoStorageDirectoryFailed;
+    } else if (configuredStatus == kStorageProbeWriteFailed) {
+        storageState = kPhotoStorageWriteProbeFailed;
+    } else if (configuredStatus == kStorageProbeInsufficientSpace) {
+        storageState = kPhotoStorageInsufficientSpace;
     }
 
     pthread_mutex_lock(&mutex_);

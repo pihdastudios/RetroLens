@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 
 /** Narrow photo-only JNI boundary. Pixels, UI, and persistence remain native. */
 public final class NativeBridge {
-  public static final String BUILD_ID = "startup-recovery-20260722-l";
+  public static final String BUILD_ID = "storage-gate-20260722-m";
   public static final boolean SAFE_BASELINE_ENABLED = false;
   public static final boolean DISPLAY_PROBE_ENABLED = true;
   public static final boolean DISPLAY_PROBE_THREAD_ENABLED = true;
@@ -72,6 +72,8 @@ public final class NativeBridge {
       long handle, int action, float x, float y, long timestampMs);
   public static native int nativeRequestDisplayProbePhoto(long handle, long timestampMs);
   public static native void nativeSetDisplayProbeFocus(long handle, boolean active);
+  public static native void nativeConfigureDisplayProbeStorage(
+      long handle, int status, int attempts);
   public static native void nativeGetDisplayProbeStats(long handle, int[] output);
   public static native void nativeClearDisplayProbe(long handle);
   public static native int nativeDestroyDisplayProbe(long handle, int[] stats);

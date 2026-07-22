@@ -65,6 +65,7 @@ struct FilterProbeMetrics {
     int galleryPreset;
     bool galleryHasThumbnail;
     int photoStorageState;
+    int photoStorageAttempts;
     int photoWriteStage;
     int photoWriteError;
     int photoFreeMiB;

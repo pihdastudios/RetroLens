@@ -11,7 +11,8 @@ This build deliberately contains no linked video runtime. The Movie button is co
 - Earlier staged builds physically proved normal preview/capture, clean CameraSequence shutdown, the 8 FPS native display thread, analytical JPEG delivery, and moving Olive Pocket output on an ILCE-5100.
 - The installed photo-runtime candidate displayed moving effects, but only in the deliberately small panel. The user also could not see the processed result in the in-app gallery.
 - The `fullscreen-photo-20260722-i` candidate removes the small-window geometry request, fills the actual locked display buffer, and renders the saved processed thumbnail full-screen in the RetroLens gallery. It is host-tested but has not been installed or physically tested.
-- The `startup-recovery-20260722-l` candidate removes storage and first-frame work from the startup-overlay gate. It keeps native output hidden until a filtered frame exists, reduces the splash to a compact Sony-preview fallback after 800 ms, and initializes derivative storage on the native photo worker. It passes host sanitizers and the legacy APK suite but is not hardware-tested or installed.
+- The `startup-recovery-20260722-l` candidate removes storage and first-frame work from the startup-overlay gate. It keeps native output hidden until a filtered frame exists and reduces the splash after 800 ms. Subsequent device feedback reached its native `RETRO FOLDER FAILED` state; the other changes were not independently revalidated in that report.
+- The `storage-gate-20260722-m` candidate retains independent preview startup but prepares storage through the same Java file APIs that work in PMCADemo and WaveSnap. Five bounded background attempts verify directories and atomic writes before JNI unlocks the native photo writer. It is host-tested but not installed or hardware-tested.
 
 Exact staged evidence and preserved recovery hashes are in `DEVICE_FINDINGS.md`.
 
@@ -20,6 +21,7 @@ Exact staged evidence and preserved recovery hashes are in `DEVICE_FINDINGS.md`.
 ```text
 CameraEx -> Sony normal preview SurfaceView -> autofocus + Sony original capture
 CameraSequence worker -> one reusable direct JPEG buffer -> one bounded native JPEG slot
+Java storage worker -> bounded mkdir/write/rename/read probe -> JNI storage gate
 hidden native process worker -> reduced 80x60 decode -> preset graph + temporal history
 first filtered frame -> reveal native surface -> full-screen 240x180 logical UI
 native photo worker -> card verification -> one snapshot -> JPEG + JSON + thumbnail + atomic index
@@ -50,7 +52,7 @@ From `RetroLens/`:
 ./scripts/build-apk.sh --clean
 ./scripts/verify-apk.sh
 ./scripts/package-release.sh --existing
-./scripts/install.sh releases/RetroLens-1.0.0-startup-recovery.apk
+./scripts/install.sh releases/RetroLens-1.0.0-storage-gate.apk
 ```
 
 The normal build output is `app/build/outputs/apk/RetroLens-debug-1.0.0.apk`. Installation requires a Sony-PMCA-RE-compatible USB mode.
@@ -95,7 +97,7 @@ RETROLENS/THUMBNAILS/<timestamp>_<preset>_preview.rgb
 
 The derivative is explicitly preview-resolution at 320x240. Its sidecar records preset, master intensity, per-preset adjustments, camera model, app version, source timestamp, and that the Sony original was preserved but its path is unknown. Scanline, mask, and vignette texture are included in the saved derivative. JPEG, sidecar, thumbnail, settings, and index files use temporary files, flush/sync, and atomic rename; partial save failure removes the transaction's preceding files.
 
-After activity resume, Java resolves the absolute Environment path without touching the card and starts camera/analysis immediately. The existing bounded native photo worker independently creates the output tree, checks available space, and proves write/close/rename/read-back behavior before enabling derivatives. Card initialization therefore cannot hold the splash or filtered preview. While it runs the UI reports `RETRO STORAGE STARTING`; hard permission, read-only, I/O, index, and no-space failures disable only the derivative. The logger buffers normal startup messages and flushes after camera teardown instead of syncing the card on the UI thread. Native diagnostics distinguish initialization, readiness, directory, write-test, low-space, and index states; Sony capture remains available throughout.
+After activity resume, one bounded Java worker uses the camera-proven `File.mkdirs()` path and retries after 0, 250, 750, 1500, and 3000 ms. It checks available space and proves write/close/rename/read-back behavior before JNI unlocks native photo initialization. Camera preview, filters, and Sony capture do not wait for this gate. The native photo worker remains asleep in `INITIALIZING`, then independently validates the pre-created tree and loads settings/indexes. The logger writes its buffered startup record only after Java verification and does not require descriptor sync. Diagnostics show Java attempt count, native storage state, write stage, and errno.
 
 Full-resolution post-processing remains disabled until safe discovery of the newly captured Sony JPEG and a memory-bounded tile path are physically proven.
 

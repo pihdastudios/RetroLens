@@ -78,19 +78,26 @@ public class Logger {
   private static boolean appendToFile(String text) {
     if (!EXTERNAL_LOGGING_ENABLED)
       return true;
+    OutputStreamWriter output = null;
     try {
       File file = getFile();
       file.getParentFile().mkdirs();
       FileOutputStream stream = new FileOutputStream(file, true);
-      OutputStreamWriter output = new OutputStreamWriter(stream, "UTF-8");
+      output = new OutputStreamWriter(stream, "UTF-8");
       output.write(text);
       output.flush();
-      stream.getFD().sync();
-      output.close();
       return true;
     } catch (IOException e) {
       android.util.Log.e("RetroLens", "File logging failed", e);
       return false;
+    } finally {
+      if (output != null) {
+        try {
+          output.close();
+        } catch (IOException exception) {
+          android.util.Log.e("RetroLens", "Log close failed", exception);
+        }
+      }
     }
   }
 }
