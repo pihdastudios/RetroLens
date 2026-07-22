@@ -4,7 +4,7 @@ LDFLAGS ?= -fsanitize=address,undefined -pthread
 ROOT := ..
 JNI := $(ROOT)/app/src/main/jni
 TARGET := build/retrolens_tests
-SOURCES := tests/test_retrolens.cpp $(JNI)/retrolens_core.cpp $(JNI)/display_probe.cpp $(JNI)/display_probe_worker.cpp $(JNI)/jpeg_encoder.cpp $(JNI)/third_party/picojpeg/picojpeg.c
+SOURCES := tests/test_retrolens.cpp $(JNI)/retrolens_core.cpp $(JNI)/reduced_jpeg_decoder.cpp $(JNI)/display_probe.cpp $(JNI)/display_probe_worker.cpp $(JNI)/jpeg_encoder.cpp $(JNI)/third_party/picojpeg/picojpeg.c
 
 .PHONY: all test clean
 all: $(TARGET)

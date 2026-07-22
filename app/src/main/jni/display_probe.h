@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "retrolens_core.h"
+
 namespace retrolens {
 
 static const int kDisplayProbeWidth = 256;
@@ -24,6 +26,18 @@ struct SequenceProbeMetrics {
     int fpsTenths;
 };
 
+struct FilterProbeMetrics {
+    bool hasFrame;
+    bool decodeError;
+    int acceptedFrames;
+    int processedFrames;
+    int droppedFrames;
+    int decodeFailures;
+    int decodeMs;
+    int filterMs;
+    int processedFpsTenths;
+};
+
 SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames,
                                                    int releasedFrames, int lastJpegBytes,
                                                    int64_t firstTimestampMs,
@@ -32,7 +46,8 @@ SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames
 uint16_t probeRgb565(int red, int green, int blue);
 bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* buildId,
                         int surfaceWidth, int surfaceHeight, int surfaceFormat, int frameNumber,
-                        const SequenceProbeMetrics& sequence);
+                        const SequenceProbeMetrics& sequence, const Pixel* filtered,
+                        const FilterProbeMetrics& filter);
 
 } // namespace retrolens
 

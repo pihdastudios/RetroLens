@@ -43,12 +43,14 @@ grep -q 'DISPLAY_PROBE_THREAD_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'ANALYTICAL_PREVIEW_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'FILTER_PANEL_ENABLED = true' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'NATIVE_OUTPUT_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'EXTERNAL_LOGGING_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
 grep -q 'nativeProbeSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
-grep -q 'display_probe.cpp display_probe_worker.cpp display_probe_jni.cpp' \
+grep -q 'reduced_jpeg_decoder.cpp display_probe.cpp display_probe_worker.cpp display_probe_jni.cpp' \
     "$PROJECT_DIR/app/src/main/jni/Android.mk"
 if grep -q 'retroLensSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"; then
     echo "Display probe must not restore the full native output surface" >&2
@@ -76,9 +78,13 @@ if grep -Eq 'Environment|FileOutputStream|FileChannel|getExternalStorageDirector
 fi
 if grep -Eq 'nativeSubmitFrame|nativeCreate\(' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
-    echo "Acquisition probe must not submit or decode compressed frames" >&2
+    echo "Filter panel probe must not create or submit to the full native runtime" >&2
     exit 1
 fi
+grep -q 'nativeSubmitDisplayProbeJpeg' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'displayProbeController.submitJpeg' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
 if grep -q 'NativeBridge.load' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
     echo "Activity must delegate native loading to the isolated display probe" >&2
@@ -106,6 +112,15 @@ if grep -Eq 'ANativeWindow|CameraSequence|fopen|mkdir' \
     echo "Offscreen probe worker must not own surfaces, camera APIs, or files" >&2
     exit 1
 fi
+grep -q 'unsigned char jpeg_\[kFilterProbeInputCapacity\]' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.h"
+if grep -Eq 'malloc|new |fopen|mkdir|encodeJpeg|AviWriter' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"; then
+    echo "Filter panel worker must use fixed buffers and contain no storage or recorder path" >&2
+    exit 1
+fi
+grep -q 'findPreset("olive_pocket")' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
 if grep -q 'android.permission.INTERNET' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then
     echo "RetroLens must not request Internet permission" >&2
     exit 1

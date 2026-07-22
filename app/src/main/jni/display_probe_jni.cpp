@@ -96,6 +96,18 @@ Java_io_pihda_retrolens_NativeBridge_nativeUpdateDisplayProbeSequence(
                                         firstTimestampMs, lastTimestampMs);
 }
 
+extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativeSubmitDisplayProbeJpeg(
+    JNIEnv* env, jclass, jlong handle, jobject jpeg, jint length, jlong timestampMs) {
+    DisplayProbe* probe = from(handle);
+    if (!probe || !jpeg || length < 4)
+        return retrolens::kFilterSubmitInvalid;
+    void* bytes = env->GetDirectBufferAddress(jpeg);
+    jlong capacity = env->GetDirectBufferCapacity(jpeg);
+    if (!bytes || capacity < length)
+        return retrolens::kFilterSubmitInvalid;
+    return probe->worker.submitJpeg(static_cast<const unsigned char*>(bytes), length, timestampMs);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_io_pihda_retrolens_NativeBridge_nativeClearDisplayProbe(JNIEnv*, jclass, jlong handle) {
     (void)from(handle);

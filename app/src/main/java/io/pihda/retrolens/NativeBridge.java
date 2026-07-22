@@ -5,11 +5,12 @@ import java.nio.ByteBuffer;
 
 /** Narrow JNI boundary. Pixels, UI, persistence, and recording remain native. */
 public final class NativeBridge {
-  public static final String BUILD_ID = "sequence-probe-20260722-e";
+  public static final String BUILD_ID = "filter-panel-probe-20260722-f";
   public static final boolean SAFE_BASELINE_ENABLED = false;
   public static final boolean DISPLAY_PROBE_ENABLED = true;
   public static final boolean DISPLAY_PROBE_THREAD_ENABLED = true;
   public static final boolean ANALYTICAL_PREVIEW_ENABLED = true;
+  public static final boolean FILTER_PANEL_ENABLED = true;
   public static final boolean NATIVE_OUTPUT_ENABLED = false;
   public static final boolean RETRO_CLIP_ENABLED = false;
   public static final boolean PROCESSED_DERIVATIVE_ENABLED = false;
@@ -19,6 +20,9 @@ public final class NativeBridge {
   public static final int SURFACE_LOCK_FAILED = 2;
   public static final int SURFACE_FORMAT_UNSUPPORTED = 3;
   public static final int SURFACE_POST_FAILED = 4;
+  public static final int FILTER_SUBMIT_ACCEPTED = 0;
+  public static final int FILTER_SUBMIT_BUSY_DROPPED = 1;
+  public static final int FILTER_SUBMIT_INVALID = 2;
   public static final int KEY_PREVIOUS = 1;
   public static final int KEY_NEXT = 2;
   public static final int KEY_UP = 3;
@@ -71,6 +75,8 @@ public final class NativeBridge {
   public static native void nativeUpdateDisplayProbeSequence(long handle, int state,
       int receivedFrames, int releasedFrames, int lastJpegBytes, long firstTimestampMs,
       long lastTimestampMs);
+  public static native int nativeSubmitDisplayProbeJpeg(
+      long handle, ByteBuffer jpeg, int length, long timestampMs);
   public static native void nativeClearDisplayProbe(long handle);
   public static native int nativeDestroyDisplayProbe(long handle, int[] stats);
 }

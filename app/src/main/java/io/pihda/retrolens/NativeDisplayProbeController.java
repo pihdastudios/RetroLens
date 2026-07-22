@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import java.nio.ByteBuffer;
 
 /** Owns the synchronous, storage-free native display probe. */
 public final class NativeDisplayProbeController implements SurfaceHolder.Callback {
@@ -84,6 +85,13 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
       return;
     NativeBridge.nativeUpdateDisplayProbeSequence(probe, state, receivedFrames, releasedFrames,
         lastJpegBytes, firstTimestampMs, lastTimestampMs);
+  }
+
+  public synchronized int submitJpeg(ByteBuffer jpeg, int length, long timestampMs) {
+    long probe = handle;
+    if (probe == 0L)
+      return NativeBridge.FILTER_SUBMIT_INVALID;
+    return NativeBridge.nativeSubmitDisplayProbeJpeg(probe, jpeg, length, timestampMs);
   }
 
   @Override

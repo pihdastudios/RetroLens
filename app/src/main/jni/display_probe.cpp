@@ -111,7 +111,8 @@ SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames
 
 bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* buildId,
                         int surfaceWidth, int surfaceHeight, int surfaceFormat, int frameNumber,
-                        const SequenceProbeMetrics& sequence) {
+                        const SequenceProbeMetrics& sequence, const Pixel* filtered,
+                        const FilterProbeMetrics& filter) {
     if (!pixels || width <= 0 || height <= 0)
         return false;
 
@@ -119,6 +120,45 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
     const uint16_t warm = probeRgb565(239, 232, 211);
     const uint16_t accent = probeRgb565(66, 232, 188);
     rectangle(pixels, width, height, 0, 0, width, height, background);
+
+    int outstanding = sequence.receivedFrames - sequence.releasedFrames;
+    bool imbalance = outstanding < 0 || outstanding > 1;
+    if (filtered && filter.hasFrame) {
+        int imageWidth = height * 4 / 3;
+        if (imageWidth > width)
+            imageWidth = width;
+        int imageLeft = (width - imageWidth) / 2;
+        for (int y = 0; y < height; y++) {
+            int sourceY = y * kFrameHeight / height;
+            for (int x = 0; x < imageWidth; x++) {
+                int sourceX = x * kFrameWidth / imageWidth;
+                const Pixel& source = filtered[sourceY * kFrameWidth + sourceX];
+                pixels[y * width + imageLeft + x] = probeRgb565(source.r, source.g, source.b);
+            }
+        }
+        rectangle(pixels, width, height, 0, 0, width, 13, background);
+        rectangle(pixels, width, height, 0, height - 13, width, height, background);
+        char top[64];
+        snprintf(top, sizeof(top), "OLIVE POCKET P%d.%d D%d F%d", filter.processedFpsTenths / 10,
+                 filter.processedFpsTenths % 10, filter.decodeMs, filter.filterMs);
+        text(pixels, width, height, 5, 3, top, accent);
+        char bottom[64];
+        snprintf(bottom, sizeof(bottom), "R%d/%d O%d X%d J%dK", sequence.receivedFrames,
+                 sequence.releasedFrames, outstanding, filter.droppedFrames,
+                 (sequence.lastJpegBytes + 1023) / 1024);
+        text(pixels, width, height, 5, height - 10, bottom,
+             imbalance || filter.decodeError ? probeRgb565(255, 150, 110) : warm);
+        if (imbalance || filter.decodeError) {
+            rectangle(pixels, width, height, 28, 58, width - 28, 86, background);
+            text(pixels, width, height, 40, 68, imbalance ? "BUFFER IMBALANCE" : "DECODE ERROR",
+                 probeRgb565(255, 150, 110));
+        }
+        rectangle(pixels, width, height, 0, 0, width, 2, accent);
+        rectangle(pixels, width, height, 0, height - 2, width, height, accent);
+        rectangle(pixels, width, height, 0, 0, 2, height, accent);
+        rectangle(pixels, width, height, width - 2, 0, width, height, accent);
+        return true;
+    }
 
     const uint16_t bars[] = {probeRgb565(239, 232, 211), probeRgb565(66, 232, 188),
                              probeRgb565(229, 91, 112),  probeRgb565(244, 193, 74),
@@ -142,17 +182,23 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
         state = "SEQUENCE ERROR";
     else if (sequence.state == kSequenceStopping)
         state = "SEQUENCE STOPPING";
-    int outstanding = sequence.receivedFrames - sequence.releasedFrames;
-    bool imbalance = outstanding < 0 || outstanding > 1;
+    if (filter.decodeError)
+        state = "DECODE ERROR";
     text(pixels, width, height, 10, 53, imbalance ? "BUFFER IMBALANCE" : state,
-         imbalance || sequence.state == kSequenceError ? probeRgb565(255, 150, 110) : warm);
+         imbalance || sequence.state == kSequenceError || filter.decodeError
+             ? probeRgb565(255, 150, 110)
+             : warm);
     char balance[64];
     snprintf(balance, sizeof(balance), "RX %d REL %d OUT %d", sequence.receivedFrames,
              sequence.releasedFrames, outstanding);
     text(pixels, width, height, 10, 72, balance, warm);
     char analytical[64];
-    snprintf(analytical, sizeof(analytical), "FPS %d.%d JPEG %dK", sequence.fpsTenths / 10,
-             sequence.fpsTenths % 10, (sequence.lastJpegBytes + 1023) / 1024);
+    if (filter.decodeError)
+        snprintf(analytical, sizeof(analytical), "DECODE FAIL %d JPEG %dK", filter.decodeFailures,
+                 (sequence.lastJpegBytes + 1023) / 1024);
+    else
+        snprintf(analytical, sizeof(analytical), "FPS %d.%d JPEG %dK", sequence.fpsTenths / 10,
+                 sequence.fpsTenths % 10, (sequence.lastJpegBytes + 1023) / 1024);
     text(pixels, width, height, 10, 91, analytical, accent);
     text(pixels, width, height, 10, 110, buildId ? buildId : "UNKNOWN BUILD", warm);
     int sweepWidth = width > 20 ? width - 20 : 1;

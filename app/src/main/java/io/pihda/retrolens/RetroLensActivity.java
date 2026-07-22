@@ -6,7 +6,7 @@ import android.os.Handler;
 import com.sony.scalar.hardware.CameraEx;
 import java.nio.ByteBuffer;
 
-/** CameraSequence acquisition probe with no decode, storage, or video path. */
+/** Bounded Olive Pocket filter-panel probe with no storage or video path. */
 public final class RetroLensActivity extends BaseActivity
     implements SonyCameraController.Listener, NativeDisplayProbeController.Listener,
                CameraSequenceFrameSource.Listener, CameraSequenceFrameSource.FrameConsumer {
@@ -37,7 +37,7 @@ public final class RetroLensActivity extends BaseActivity
         (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this);
     mainHandler = new Handler();
     Logger.startSession(NativeBridge.BUILD_ID);
-    Logger.info("RetroLens: sequence acquisition probe created model=" + Build.MODEL + " sdk="
+    Logger.info("RetroLens: filter panel probe created model=" + Build.MODEL + " sdk="
         + Build.VERSION.SDK_INT + " abi=" + Build.CPU_ABI + " build=" + NativeBridge.BUILD_ID);
   }
 
@@ -55,12 +55,12 @@ public final class RetroLensActivity extends BaseActivity
     setAutoPowerOffMode(false);
     statusView.showStarting();
     cameraController.start();
-    Logger.info("RetroLens: sequence acquisition probe resume complete");
+    Logger.info("RetroLens: filter panel probe resume complete");
   }
 
   @Override
   protected void onPause() {
-    Logger.info("RetroLens: sequence acquisition probe pause begin");
+    Logger.info("RetroLens: filter panel probe pause begin");
     resumed = false;
     mainHandler.removeCallbacksAndMessages(null);
     readyCamera = null;
@@ -70,7 +70,7 @@ public final class RetroLensActivity extends BaseActivity
     displayProbeController.stop();
     if (sequenceStopped) {
       cameraController.stop();
-      Logger.info("RetroLens: sequence probe pause release complete");
+      Logger.info("RetroLens: filter panel probe pause release complete");
     } else {
       cameraQuarantined = true;
       Logger.error(
@@ -144,6 +144,7 @@ public final class RetroLensActivity extends BaseActivity
       firstFrameTimestampMs = timestampMs;
     lastFrameTimestampMs = timestampMs;
     updateSequenceMetrics(NativeDisplayProbeController.SEQUENCE_ACTIVE);
+    displayProbeController.submitJpeg(buffer, length, timestampMs);
   }
 
   @Override
@@ -207,8 +208,8 @@ public final class RetroLensActivity extends BaseActivity
 
   @Override
   protected boolean onMovieKeyDown() {
-    statusView.showTransient("VIDEO DISABLED", "ACQUISITION PROBE - PHOTO ONLY", 1400L);
-    Logger.info("RetroLens: movie key ignored in sequence probe");
+    statusView.showTransient("VIDEO DISABLED", "FILTER PANEL PROBE - PHOTO ONLY", 1400L);
+    Logger.info("RetroLens: movie key ignored in filter panel probe");
     return true;
   }
 
@@ -241,9 +242,10 @@ public final class RetroLensActivity extends BaseActivity
     if (source == null)
       return true;
     updateSequenceMetrics(NativeDisplayProbeController.SEQUENCE_STOPPING);
+    source.requestSequenceStop();
     if (source.stopAndJoin(2000L))
       return true;
-    Logger.error("RetroLens: frame worker initial join timed out; requesting sequence stop");
+    Logger.error("RetroLens: frame worker initial join timed out after sequence stop request");
     source.requestSequenceStop();
     return source.stopAndJoin(1000L);
   }

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "reduced_jpeg_decoder.h"
 #include "retrolens_core.h"
 
 namespace retrolens {
@@ -28,7 +29,9 @@ static void deadlineFromNow(struct timespec* deadline, int milliseconds) {
 
 DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs)
     : running_(false), threadStarted_(false), intervalMs_(intervalMs), frameCount_(0),
-      postCount_(0), surfaceWidth_(0), surfaceHeight_(0), surfaceFormat_(0) {
+      postCount_(0), surfaceWidth_(0), surfaceHeight_(0), surfaceFormat_(0), inputPending_(false),
+      inputInUse_(false), hasPrevious_(false), jpegLength_(0), jpegTimestampMs_(0),
+      firstProcessedTimestampMs_(0), lastProcessedTimestampMs_(0) {
     if (intervalMs_ < 16)
         intervalMs_ = 16;
     if (intervalMs_ > 1000)
@@ -38,8 +41,12 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs)
     pthread_mutex_init(&mutex_, 0);
     pthread_cond_init(&condition_, 0);
     sequenceMetrics_ = calculateSequenceProbeMetrics(kSequenceOff, 0, 0, 0, 0, 0);
+    memset(&filterMetrics_, 0, sizeof(filterMetrics_));
+    memset(raw_, 0, sizeof(raw_));
+    memset(filtered_, 0, sizeof(filtered_));
+    memset(previous_, 0, sizeof(previous_));
     renderDisplayProbe(pixels_, kDisplayProbeWidth, kDisplayProbeHeight, buildId_, 0, 0, 0, 0,
-                       sequenceMetrics_);
+                       sequenceMetrics_, 0, filterMetrics_);
 }
 
 DisplayProbeWorker::~DisplayProbeWorker() {
@@ -100,6 +107,29 @@ void DisplayProbeWorker::updateSequenceMetrics(int state, int receivedFrames, in
     pthread_mutex_unlock(&mutex_);
 }
 
+int DisplayProbeWorker::submitJpeg(const unsigned char* jpeg, int length, int64_t timestampMs) {
+    if (!jpeg || length < 4 || length > kFilterProbeInputCapacity || timestampMs <= 0)
+        return kFilterSubmitInvalid;
+    pthread_mutex_lock(&mutex_);
+    if (!running_) {
+        pthread_mutex_unlock(&mutex_);
+        return kFilterSubmitInvalid;
+    }
+    if (inputPending_ || inputInUse_) {
+        filterMetrics_.droppedFrames++;
+        pthread_mutex_unlock(&mutex_);
+        return kFilterSubmitBusyDropped;
+    }
+    memcpy(jpeg_, jpeg, (size_t)length);
+    jpegLength_ = length;
+    jpegTimestampMs_ = timestampMs;
+    inputPending_ = true;
+    filterMetrics_.acceptedFrames++;
+    pthread_cond_broadcast(&condition_);
+    pthread_mutex_unlock(&mutex_);
+    return kFilterSubmitAccepted;
+}
+
 bool DisplayProbeWorker::blitLatest(void* destination, int width, int height, int stride,
                                     int format, int* frameNumber) {
     pthread_mutex_lock(&mutex_);
@@ -127,12 +157,33 @@ bool DisplayProbeWorker::waitForFrame(int minimumFrame, int timeoutMs) {
     return reached;
 }
 
+bool DisplayProbeWorker::waitForProcessedFrame(int minimumFrame, int timeoutMs) {
+    struct timespec deadline;
+    deadlineFromNow(&deadline, timeoutMs);
+    pthread_mutex_lock(&mutex_);
+    while (running_ && filterMetrics_.processedFrames < minimumFrame) {
+        int result = pthread_cond_timedwait(&condition_, &mutex_, &deadline);
+        if (result != 0)
+            break;
+    }
+    bool reached = filterMetrics_.processedFrames >= minimumFrame;
+    pthread_mutex_unlock(&mutex_);
+    return reached;
+}
+
 void DisplayProbeWorker::getStats(int* frameCount, int* postCount) {
     pthread_mutex_lock(&mutex_);
     if (frameCount)
         *frameCount = frameCount_;
     if (postCount)
         *postCount = postCount_;
+    pthread_mutex_unlock(&mutex_);
+}
+
+void DisplayProbeWorker::getFilterStats(FilterProbeMetrics* metrics) {
+    pthread_mutex_lock(&mutex_);
+    if (metrics)
+        *metrics = filterMetrics_;
     pthread_mutex_unlock(&mutex_);
 }
 
@@ -144,6 +195,48 @@ void* DisplayProbeWorker::threadEntry(void* context) {
 void DisplayProbeWorker::run() {
     pthread_mutex_lock(&mutex_);
     while (running_) {
+        if (inputPending_) {
+            inputPending_ = false;
+            inputInUse_ = true;
+            int length = jpegLength_;
+            int64_t timestampMs = jpegTimestampMs_;
+            pthread_mutex_unlock(&mutex_);
+
+            int64_t decodeStartMs = monotonicMs();
+            bool decoded = decodeReducedJpeg(jpeg_, (size_t)length, raw_);
+            int64_t filterStartMs = monotonicMs();
+            if (decoded) {
+                const Preset& olivePocket = presetAt(findPreset("olive_pocket"));
+                processFrame(raw_, filtered_, 0, hasPrevious_ ? previous_ : 0, kFrameWidth,
+                             kFrameHeight, olivePocket, 100, 0x4f4c4956U, timestampMs);
+            }
+            int64_t completedMs = monotonicMs();
+
+            pthread_mutex_lock(&mutex_);
+            filterMetrics_.decodeMs = (int)(filterStartMs - decodeStartMs);
+            filterMetrics_.filterMs = (int)(completedMs - filterStartMs);
+            if (decoded) {
+                memcpy(previous_, filtered_, sizeof(previous_));
+                hasPrevious_ = true;
+                filterMetrics_.hasFrame = true;
+                filterMetrics_.decodeError = false;
+                filterMetrics_.processedFrames++;
+                if (!firstProcessedTimestampMs_)
+                    firstProcessedTimestampMs_ = timestampMs;
+                lastProcessedTimestampMs_ = timestampMs;
+                if (filterMetrics_.processedFrames > 1 &&
+                    lastProcessedTimestampMs_ > firstProcessedTimestampMs_) {
+                    int64_t elapsedMs = lastProcessedTimestampMs_ - firstProcessedTimestampMs_;
+                    int64_t fpsTenths =
+                        ((int64_t)filterMetrics_.processedFrames - 1) * 10000 / elapsedMs;
+                    filterMetrics_.processedFpsTenths = fpsTenths > 999 ? 999 : (int)fpsTenths;
+                }
+            } else {
+                filterMetrics_.decodeError = true;
+                filterMetrics_.decodeFailures++;
+            }
+            inputInUse_ = false;
+        }
         renderNextLocked();
         pthread_cond_broadcast(&condition_);
         struct timespec deadline;
@@ -160,7 +253,8 @@ void DisplayProbeWorker::renderNextLocked() {
     else
         frameCount_++;
     renderDisplayProbe(pixels_, kDisplayProbeWidth, kDisplayProbeHeight, buildId_, surfaceWidth_,
-                       surfaceHeight_, surfaceFormat_, frameCount_, sequenceMetrics_);
+                       surfaceHeight_, surfaceFormat_, frameCount_, sequenceMetrics_,
+                       filterMetrics_.hasFrame ? filtered_ : 0, filterMetrics_);
 }
 
 } // namespace retrolens

@@ -13,8 +13,8 @@
 #include <unistd.h>
 
 #include "jpeg_encoder.h"
+#include "reduced_jpeg_decoder.h"
 #include "retrolens_core.h"
-#include "third_party/picojpeg/picojpeg.h"
 
 using retrolens::Pixel;
 using retrolens::Preset;
@@ -37,30 +37,6 @@ enum SurfaceStatus {
 
 enum Scene { SCENE_CAMERA = 0, SCENE_DRAWER = 1, SCENE_BROWSER = 2, SCENE_GALLERY = 3 };
 enum RecorderJob { JOB_NONE = 0, JOB_SNAPSHOT = 1, JOB_VIDEO = 2 };
-
-struct JpegInput {
-    const unsigned char* data;
-    size_t length;
-    size_t offset;
-};
-
-static unsigned char readJpeg(unsigned char* destination, unsigned char requested,
-                              unsigned char* actual, void* context) {
-    JpegInput* input = static_cast<JpegInput*>(context);
-    if (!input || !destination || !actual)
-        return PJPG_STREAM_READ_ERROR;
-    size_t remaining = input->offset < input->length ? input->length - input->offset : 0;
-    size_t count = remaining < requested ? remaining : requested;
-    if (count)
-        memcpy(destination, input->data + input->offset, count);
-    input->offset += count;
-    *actual = (unsigned char)count;
-    return 0;
-}
-
-static int mcuOffset(int localX, int localY) {
-    return (localY / 8) * 128 + (localX / 8) * 64;
-}
 
 static int64_t monotonicMs() {
     struct timespec t;
@@ -602,43 +578,6 @@ class Runtime {
                               : (favoriteMaskHi_ & ((uint64_t)1 << (selected_ - 64))) != 0;
     }
 
-    bool decodeReduced(const unsigned char* jpeg, int length) {
-        JpegInput input = {jpeg, (size_t)length, 0};
-        pjpeg_image_info_t info;
-        unsigned char status = pjpeg_decode_init(&info, readJpeg, &input, 1);
-        if (status || info.m_width != 640 || info.m_height != 480)
-            return false;
-        for (int my = 0; my < info.m_MCUSPerCol; my++)
-            for (int mx = 0; mx < info.m_MCUSPerRow; mx++) {
-                status = pjpeg_decode_mcu();
-                if (status)
-                    return false;
-                int left = mx * info.m_MCUWidth, top = my * info.m_MCUHeight,
-                    right = left + info.m_MCUWidth, bottom = top + info.m_MCUHeight;
-                if (right > info.m_width)
-                    right = info.m_width;
-                if (bottom > info.m_height)
-                    bottom = info.m_height;
-                int ol = left * retrolens::kFrameWidth / info.m_width,
-                    ot = top * retrolens::kFrameHeight / info.m_height;
-                int orr = (right * retrolens::kFrameWidth + info.m_width - 1) / info.m_width,
-                    ob = (bottom * retrolens::kFrameHeight + info.m_height - 1) / info.m_height;
-                for (int y = ot; y < ob; y++) {
-                    int sy = y * info.m_height / retrolens::kFrameHeight;
-                    int ly = sy - top;
-                    for (int x = ol; x < orr; x++) {
-                        int sx = x * info.m_width / retrolens::kFrameWidth;
-                        int lx = sx - left;
-                        int off = mcuOffset(lx, ly);
-                        Pixel& p = raw_[y * retrolens::kFrameWidth + x];
-                        p.r = info.m_pMCUBufR[off];
-                        p.g = info.m_pMCUBufG[off];
-                        p.b = info.m_pMCUBufB[off];
-                    }
-                }
-            }
-        return true;
-    }
     void processLoop() {
         while (true) {
             pthread_mutex_lock(&mutex_);
@@ -679,7 +618,7 @@ class Runtime {
             pthread_mutex_unlock(&mutex_);
             if (frame) {
                 int64_t begin = monotonicMs();
-                bool decoded = decodeReduced(input_, length);
+                bool decoded = retrolens::decodeReducedJpeg(input_, (size_t)length, raw_);
                 int64_t decodedAt = monotonicMs();
                 if (decoded) {
                     const Preset& p = retrolens::presetAt(framePreset);

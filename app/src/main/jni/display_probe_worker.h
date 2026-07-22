@@ -8,6 +8,14 @@
 
 namespace retrolens {
 
+enum FilterSubmitStatus {
+    kFilterSubmitAccepted = 0,
+    kFilterSubmitBusyDropped = 1,
+    kFilterSubmitInvalid = 2
+};
+
+static const int kFilterProbeInputCapacity = 256 * 1024;
+
 class DisplayProbeWorker {
   public:
     DisplayProbeWorker(const char* buildId, int intervalMs);
@@ -17,10 +25,13 @@ class DisplayProbeWorker {
     void updateSurfaceInfo(int width, int height, int format);
     void updateSequenceMetrics(int state, int receivedFrames, int releasedFrames, int lastJpegBytes,
                                int64_t firstTimestampMs, int64_t lastTimestampMs);
+    int submitJpeg(const unsigned char* jpeg, int length, int64_t timestampMs);
     bool blitLatest(void* destination, int width, int height, int stride, int format,
                     int* frameNumber);
     bool waitForFrame(int minimumFrame, int timeoutMs);
+    bool waitForProcessedFrame(int minimumFrame, int timeoutMs);
     void getStats(int* frameCount, int* postCount);
+    void getFilterStats(FilterProbeMetrics* metrics);
 
   private:
     static void* threadEntry(void* context);
@@ -39,6 +50,18 @@ class DisplayProbeWorker {
     int surfaceHeight_;
     int surfaceFormat_;
     SequenceProbeMetrics sequenceMetrics_;
+    FilterProbeMetrics filterMetrics_;
+    bool inputPending_;
+    bool inputInUse_;
+    bool hasPrevious_;
+    int jpegLength_;
+    int64_t jpegTimestampMs_;
+    int64_t firstProcessedTimestampMs_;
+    int64_t lastProcessedTimestampMs_;
+    unsigned char jpeg_[kFilterProbeInputCapacity];
+    Pixel raw_[kFrameWidth * kFrameHeight];
+    Pixel filtered_[kFrameWidth * kFrameHeight];
+    Pixel previous_[kFrameWidth * kFrameHeight];
     char buildId_[48];
     uint16_t pixels_[kDisplayProbeWidth * kDisplayProbeHeight];
 };

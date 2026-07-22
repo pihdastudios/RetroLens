@@ -1,6 +1,7 @@
 #include "display_probe.h"
 #include "display_probe_worker.h"
 #include "jpeg_encoder.h"
+#include "reduced_jpeg_decoder.h"
 #include "retrolens_core.h"
 #include "third_party/picojpeg/picojpeg.h"
 
@@ -143,10 +144,11 @@ static unsigned long checksum16(const uint16_t* pixels, int count) {
 
 static void testDisplayProbeRaster() {
     SequenceProbeMetrics starting = calculateSequenceProbeMetrics(kSequenceStarting, 0, 0, 0, 0, 0);
+    FilterProbeMetrics filter = {false, false, 0, 0, 0, 0, 0, 0, 0};
     uint16_t guarded[2 + 13 * 9 + 2];
     for (int index = 0; index < (int)(sizeof(guarded) / sizeof(guarded[0])); index++)
         guarded[index] = 0x55aa;
-    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4, 7, starting));
+    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4, 7, starting, 0, filter));
     assert(guarded[0] == 0x55aa && guarded[1] == 0x55aa);
     assert(guarded[2 + 13 * 9] == 0x55aa && guarded[2 + 13 * 9 + 1] == 0x55aa);
     assert(checksum16(guarded + 2, 13 * 9) != 0);
@@ -154,17 +156,17 @@ static void testDisplayProbeRaster() {
     uint16_t first[kDisplayProbeWidth * kDisplayProbeHeight];
     uint16_t second[kDisplayProbeWidth * kDisplayProbeHeight];
     assert(renderDisplayProbe(first, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 11, starting));
+                              256, 144, 4, 11, starting, 0, filter));
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 11, starting));
+                              256, 144, 4, 11, starting, 0, filter));
     assert(!memcmp(first, second, sizeof(first)));
     assert(checksum16(first, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
     assert(first[0] == probeRgb565(66, 232, 188));
-    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4, 0, starting));
-    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4, 0, starting));
+    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4, 0, starting, 0, filter));
+    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4, 0, starting, 0, filter));
 
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 12, starting));
+                              256, 144, 4, 12, starting, 0, filter));
     assert(memcmp(first, second, sizeof(first)) != 0);
 
     SequenceProbeMetrics active =
@@ -173,13 +175,28 @@ static void testDisplayProbeRaster() {
     assert(active.receivedFrames == 10 && active.releasedFrames == 9);
     assert(active.lastJpegBytes == 65536 && active.fpsTenths == 90);
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "sequence-probe",
-                              256, 144, 4, 11, active));
+                              256, 144, 4, 11, active, 0, filter));
     assert(memcmp(first, second, sizeof(first)) != 0);
 
     SequenceProbeMetrics malformed = calculateSequenceProbeMetrics(99, -1, -2, 999999, 2000, 1000);
     assert(malformed.state == kSequenceError);
     assert(malformed.receivedFrames == 0 && malformed.releasedFrames == 0);
     assert(malformed.lastJpegBytes == 256 * 1024 && malformed.fpsTenths == 0);
+
+    Pixel filtered[kFrameWidth * kFrameHeight];
+    for (int index = 0; index < kFrameWidth * kFrameHeight; index++) {
+        filtered[index].r = (unsigned char)(index % 256);
+        filtered[index].g = (unsigned char)((index * 3) % 256);
+        filtered[index].b = (unsigned char)((index * 7) % 256);
+    }
+    filter.hasFrame = true;
+    filter.processedFrames = 3;
+    filter.processedFpsTenths = 84;
+    filter.decodeMs = 6;
+    filter.filterMs = 1;
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "filter-probe", 256,
+                              144, 4, 11, active, filtered, filter));
+    assert(checksum16(second, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
 }
 
 static void testDisplayProbeWorkerLifecycle() {
@@ -217,6 +234,62 @@ static void testDisplayProbeWorkerLifecycle() {
         worker.getStats(&stableFrames, &stablePosts);
         assert(stableFrames == framesAfterStop && stablePosts == postsAfterStop);
     }
+}
+
+static size_t makeAnalyticalJpeg(unsigned char* output, size_t capacity) {
+    Pixel* source = new Pixel[640 * 480];
+    fill(source, 640, 480);
+    size_t size = 0;
+    bool encoded = encodeJpeg(source, 640, 480, 82, output, capacity, &size);
+    delete[] source;
+    return encoded ? size : 0;
+}
+
+static void testReducedDecodeAndBoundedWorker() {
+    unsigned char* encoded = new unsigned char[kFilterProbeInputCapacity];
+    size_t size = makeAnalyticalJpeg(encoded, kFilterProbeInputCapacity);
+    assert(size > 1000 && size <= (size_t)kFilterProbeInputCapacity);
+
+    Pixel decoded[kFrameWidth * kFrameHeight];
+    memset(decoded, 0, sizeof(decoded));
+    assert(decodeReducedJpeg(encoded, size, decoded));
+    assert(checksum(decoded, kFrameWidth * kFrameHeight) != 0);
+    assert(!decodeReducedJpeg(encoded, 3, decoded));
+    assert(!decodeReducedJpeg(0, size, decoded));
+    assert(!decodeReducedJpeg(encoded, size, 0));
+
+    Pixel small[64 * 48];
+    fill(small, 64, 48);
+    unsigned char wrongSize[128 * 1024];
+    size_t wrongSizeLength = 0;
+    assert(encodeJpeg(small, 64, 48, 82, wrongSize, sizeof(wrongSize), &wrongSizeLength));
+    assert(!decodeReducedJpeg(wrongSize, wrongSizeLength, decoded));
+
+    DisplayProbeWorker worker("host-filter-probe", 8);
+    assert(worker.start());
+    int submitted = 0;
+    int dropped = 0;
+    for (int index = 0; index < 20; index++) {
+        int result = worker.submitJpeg(encoded, (int)size, 1000 + index * 100);
+        assert(result != kFilterSubmitInvalid);
+        if (result == kFilterSubmitAccepted)
+            submitted++;
+        else
+            dropped++;
+    }
+    assert(submitted >= 1 && submitted + dropped == 20);
+    assert(worker.waitForProcessedFrame(1, 1000));
+    FilterProbeMetrics metrics;
+    memset(&metrics, 0, sizeof(metrics));
+    worker.getFilterStats(&metrics);
+    assert(metrics.hasFrame && !metrics.decodeError);
+    assert(metrics.acceptedFrames == submitted);
+    assert(metrics.droppedFrames == dropped);
+    assert(metrics.processedFrames >= 1 && metrics.processedFrames <= metrics.acceptedFrames);
+    assert(metrics.decodeFailures == 0);
+    assert(worker.stop() <= 250);
+    assert(worker.submitJpeg(encoded, (int)size, 5000) == kFilterSubmitInvalid);
+    delete[] encoded;
 }
 
 static void testPerformanceController() {
@@ -285,6 +358,8 @@ static void testAviBoundsAndAbort() {
 
 static void testMalformedJpegRejection() {
     const unsigned char malformed[] = {0xff, 0xd8, 0xff, 0x00, 0x12, 0x34, 0xff, 0xd9};
+    Pixel output[kFrameWidth * kFrameHeight];
+    assert(!decodeReducedJpeg(malformed, sizeof(malformed), output));
     BadInput input = {malformed, sizeof(malformed), 0};
     pjpeg_image_info_t info;
     unsigned char status = pjpeg_decode_init(&info, readBadJpeg, &input, 1);
@@ -298,6 +373,7 @@ int main() {
     testSurfaceBlitBoundsAndFormats();
     testDisplayProbeRaster();
     testDisplayProbeWorkerLifecycle();
+    testReducedDecodeAndBoundedWorker();
     testPerformanceController();
     testJsonEscaping();
     testJpegAndAvi();
