@@ -49,6 +49,7 @@ The OpenMemories framework and compile-only Sony stubs are pinned under `app/lib
 From `RetroLens/`:
 
 ```bash
+./scripts/format.sh --check
 ./scripts/smoke-test.sh --host-only
 ./scripts/build-native.sh
 ./scripts/build-apk.sh --clean

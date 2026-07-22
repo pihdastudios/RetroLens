@@ -19,22 +19,22 @@ struct Pixel {
 };
 
 enum EffectFlags {
-    FX_MONO       = 1 << 0,
-    FX_DITHER     = 1 << 1,
-    FX_SCANLINES  = 1 << 2,
-    FX_PIXELATE   = 1 << 3,
-    FX_TEMPORAL   = 1 << 4,
-    FX_JITTER     = 1 << 5,
-    FX_VIGNETTE   = 1 << 6,
-    FX_EDGE       = 1 << 7,
-    FX_HALFTONE   = 1 << 8,
-    FX_THERMAL    = 1 << 9,
-    FX_CGA        = 1 << 10,
-    FX_INVERT     = 1 << 11,
-    FX_ASCII      = 1 << 12,
-    FX_TEAR       = 1 << 13,
-    FX_BLOOM      = 1 << 14,
-    FX_MASK       = 1 << 15
+    FX_MONO = 1 << 0,
+    FX_DITHER = 1 << 1,
+    FX_SCANLINES = 1 << 2,
+    FX_PIXELATE = 1 << 3,
+    FX_TEMPORAL = 1 << 4,
+    FX_JITTER = 1 << 5,
+    FX_VIGNETTE = 1 << 6,
+    FX_EDGE = 1 << 7,
+    FX_HALFTONE = 1 << 8,
+    FX_THERMAL = 1 << 9,
+    FX_CGA = 1 << 10,
+    FX_INVERT = 1 << 11,
+    FX_ASCII = 1 << 12,
+    FX_TEAR = 1 << 13,
+    FX_BLOOM = 1 << 14,
+    FX_MASK = 1 << 15
 };
 
 enum ControlFlags {
@@ -70,9 +70,9 @@ struct Preset {
 int presetCount();
 const Preset& presetAt(int index);
 int findPreset(const char* id);
-void processFrame(const Pixel* source, Pixel* output, Pixel* scratch,
-        const Pixel* previous, int width, int height, const Preset& preset,
-        int intensity, uint32_t seed, int64_t timestampMs);
+void processFrame(const Pixel* source, Pixel* output, Pixel* scratch, const Pixel* previous,
+                  int width, int height, const Preset& preset, int intensity, uint32_t seed,
+                  int64_t timestampMs);
 uint32_t nextRandom(uint32_t* state);
 void jsonEscape(FILE* output, const char* value);
 
@@ -82,20 +82,25 @@ struct PerformanceDecision {
     bool reducedAnimation;
 };
 
-PerformanceDecision choosePerformance(int decodeMs, int filterMs, int renderMs,
-        int droppedFrames, int forcedMode);
+PerformanceDecision choosePerformance(int decodeMs, int filterMs, int renderMs, int droppedFrames,
+                                      int forcedMode);
 
 class AviWriter {
-public:
+  public:
     AviWriter();
     ~AviWriter();
     bool open(const char* temporaryPath, int width, int height, int fps);
     bool addFrame(const unsigned char* jpeg, size_t size);
     bool finish();
     void abort();
-    int frameCount() const { return frameCount_; }
-    long bytesWritten() const { return bytesWritten_; }
-private:
+    int frameCount() const {
+        return frameCount_;
+    }
+    long bytesWritten() const {
+        return bytesWritten_;
+    }
+
+  private:
     FILE* file_;
     int width_;
     int height_;

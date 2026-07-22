@@ -18,7 +18,8 @@ struct EncoderTarget {
 
 static void writeEncoded(void* context, void* data, int size) {
     EncoderTarget* target = static_cast<EncoderTarget*>(context);
-    if (!target || size < 0 || target->overflow) return;
+    if (!target || size < 0 || target->overflow)
+        return;
     if ((size_t)size > target->capacity - target->size) {
         target->overflow = true;
         return;
@@ -27,14 +28,16 @@ static void writeEncoded(void* context, void* data, int size) {
     target->size += (size_t)size;
 }
 
-bool encodeJpeg(const Pixel* pixels, int width, int height, int quality,
-        unsigned char* output, size_t capacity, size_t* outputSize) {
-    if (outputSize) *outputSize = 0;
-    if (!pixels || !output || !outputSize || width <= 0 || height <= 0) return false;
-    EncoderTarget target = { output, capacity, 0, false };
-    int result = stbi_write_jpg_to_func(writeEncoded, &target, width, height, 3,
-            pixels, quality);
-    if (!result || target.overflow || target.size < 4) return false;
+bool encodeJpeg(const Pixel* pixels, int width, int height, int quality, unsigned char* output,
+                size_t capacity, size_t* outputSize) {
+    if (outputSize)
+        *outputSize = 0;
+    if (!pixels || !output || !outputSize || width <= 0 || height <= 0)
+        return false;
+    EncoderTarget target = {output, capacity, 0, false};
+    int result = stbi_write_jpg_to_func(writeEncoded, &target, width, height, 3, pixels, quality);
+    if (!result || target.overflow || target.size < 4)
+        return false;
     *outputSize = target.size;
     return true;
 }
