@@ -11,7 +11,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import java.nio.ByteBuffer;
 
-/** Owns the synchronous, storage-free native display probe. */
+/** Owns the synchronous full-screen native photo runtime. */
 public final class NativeDisplayProbeController
     implements SurfaceHolder.Callback, View.OnTouchListener {
   public static final int SEQUENCE_OFF = 0;
@@ -88,6 +88,7 @@ public final class NativeDisplayProbeController
     surfaceReady = false;
     surfaceView.setOnTouchListener(null);
     destroyNativeProbe();
+    surfaceView.setVisibility(View.GONE);
     Logger.info("DisplayProbe: stopped");
   }
 
@@ -183,6 +184,11 @@ public final class NativeDisplayProbeController
       listener.onDisplayProbeResult(status);
     }
     NativeBridge.nativeGetDisplayProbeStats(handle, runtimeStats);
+    if (runtimeStats[6] == 0 && runtimeStats[7] >= 3) {
+      Logger.error("PhotoRuntime: analytical decode failed repeatedly; showing Sony fallback");
+      fail(NativeBridge.SURFACE_FORMAT_UNSUPPORTED);
+      return false;
+    }
     if (runtimeStats[1] != reportedPhotoSaves) {
       reportedPhotoSaves = runtimeStats[1];
       Logger.info("PhotoRuntime: processed derivative saved count=" + runtimeStats[1]

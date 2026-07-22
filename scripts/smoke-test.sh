@@ -52,12 +52,18 @@ grep -q 'NATIVE_OUTPUT_ENABLED = false' \
 grep -q 'EXTERNAL_LOGGING_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
 grep -q 'nativeProbeSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
-grep -q 'android:layout_width="240dp"' \
-    "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
-grep -q 'android:layout_height="180dp"' \
-    "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
+native_surface_block="$(sed -n '/android:id="@+id\/nativeProbeSurface"/,/\/>/p' \
+    "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml")"
+grep -q 'android:layout_width="match_parent"' <<< "$native_surface_block"
+grep -q 'android:layout_height="match_parent"' <<< "$native_surface_block"
 grep -q 'kDisplayProbeWidth = 240' "$PROJECT_DIR/app/src/main/jni/display_probe.h"
 grep -q 'kDisplayProbeHeight = 180' "$PROJECT_DIR/app/src/main/jni/display_probe.h"
+grep -q 'blitRgb565CenterCrop' "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
+if grep -q 'ANativeWindow_setBuffersGeometry' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_jni.cpp"; then
+    echo "Fullscreen runtime must use the locked display buffer dimensions" >&2
+    exit 1
+fi
 grep -q 'retrolens_core.cpp reduced_jpeg_decoder.cpp display_probe.cpp display_probe_worker.cpp display_probe_jni.cpp photo_store.cpp' \
     "$PROJECT_DIR/app/src/main/jni/Android.mk"
 if grep -q 'retrolens_runtime.cpp' "$PROJECT_DIR/app/src/main/jni/Android.mk"; then

@@ -80,6 +80,9 @@ void processFrame(const Pixel* source, Pixel* output, Pixel* scratch, const Pixe
 bool blitRgb565(const uint16_t* source, int sourceWidth, int sourceHeight, void* destination,
                 int destinationWidth, int destinationHeight, int destinationStride,
                 int destinationFormat);
+bool blitRgb565CenterCrop(const uint16_t* source, int sourceWidth, int sourceHeight,
+                          void* destination, int destinationWidth, int destinationHeight,
+                          int destinationStride, int destinationFormat);
 uint32_t nextRandom(uint32_t* state);
 void jsonEscape(FILE* output, const char* value);
 

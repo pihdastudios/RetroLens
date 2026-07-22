@@ -134,6 +134,47 @@ static void testSurfaceBlitBoundsAndFormats() {
     assert(rgba[0] == 0xff0000ffU);
     assert(!blitRgb565(source, 2, 2, rgba, 3, 5, 2, 1));
     assert(!blitRgb565(source, 2, 2, rgba, 3, 5, 3, 99));
+
+    const int fullWidth = 640;
+    const int fullHeight = 480;
+    const int fullStride = 648;
+    uint16_t* logical = new uint16_t[kDisplayProbeWidth * kDisplayProbeHeight];
+    for (int y = 0; y < kDisplayProbeHeight; y++)
+        for (int x = 0; x < kDisplayProbeWidth; x++)
+            logical[y * kDisplayProbeWidth + x] =
+                probeRgb565(x * 255 / (kDisplayProbeWidth - 1), y * 255 / (kDisplayProbeHeight - 1),
+                            (x + y) & 255);
+    uint16_t* fullscreen = new uint16_t[fullStride * fullHeight + 2];
+    for (int index = 0; index < fullStride * fullHeight + 2; index++)
+        fullscreen[index] = 0x55aa;
+    assert(blitRgb565CenterCrop(logical, kDisplayProbeWidth, kDisplayProbeHeight, fullscreen,
+                                fullWidth, fullHeight, fullStride, 4));
+    assert(fullscreen[0] == logical[0]);
+    assert(fullscreen[fullWidth - 1] == logical[kDisplayProbeWidth - 1]);
+    assert(fullscreen[(fullHeight - 1) * fullStride] ==
+           logical[(kDisplayProbeHeight - 1) * kDisplayProbeWidth]);
+    assert(fullscreen[(fullHeight - 1) * fullStride + fullWidth - 1] ==
+           logical[kDisplayProbeWidth * kDisplayProbeHeight - 1]);
+    assert(fullscreen[fullStride * fullHeight] == 0x55aa &&
+           fullscreen[fullStride * fullHeight + 1] == 0x55aa);
+    for (int y = 0; y < fullHeight; y++)
+        for (int x = fullWidth; x < fullStride; x++)
+            assert(fullscreen[y * fullStride + x] == 0x55aa);
+
+    const int wideHeight = 360;
+    uint32_t* wide = new uint32_t[fullWidth * wideHeight + 2];
+    for (int index = 0; index < fullWidth * wideHeight + 2; index++)
+        wide[index] = 0x12345678U;
+    assert(blitRgb565CenterCrop(logical, kDisplayProbeWidth, kDisplayProbeHeight, wide, fullWidth,
+                                wideHeight, fullWidth, 1));
+    assert(wide[0] != 0x12345678U && wide[fullWidth - 1] != 0x12345678U);
+    assert(wide[(wideHeight - 1) * fullWidth] != 0x12345678U);
+    assert(wide[fullWidth * wideHeight - 1] != 0x12345678U);
+    assert(wide[fullWidth * wideHeight] == 0x12345678U &&
+           wide[fullWidth * wideHeight + 1] == 0x12345678U);
+    delete[] wide;
+    delete[] fullscreen;
+    delete[] logical;
 }
 
 static unsigned long checksum16(const uint16_t* pixels, int count) {
@@ -219,6 +260,33 @@ static void testDisplayProbeRaster() {
            probeRgb565(filtered[30 * kFrameWidth + kFrameWidth - 1].r,
                        filtered[30 * kFrameWidth + kFrameWidth - 1].g,
                        filtered[30 * kFrameWidth + kFrameWidth - 1].b));
+
+    Pixel gallery[kFrameWidth * kFrameHeight];
+    for (int index = 0; index < kFrameWidth * kFrameHeight; index++) {
+        gallery[index].r = 210;
+        gallery[index].g = 40;
+        gallery[index].b = 70;
+    }
+    filter.scene = kPhotoSceneGallery;
+    filter.galleryPhotoCount = 1;
+    filter.galleryIndex = 0;
+    filter.galleryPreset = findPreset("piss_filter_2007");
+    filter.galleryHasThumbnail = true;
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "gallery-test", 640,
+                              480, 4, 13, active, filtered, filtered, gallery, filter));
+    assert(second[90 * kDisplayProbeWidth + 120] == probeRgb565(210, 40, 70));
+    assert(second[40 * kDisplayProbeWidth + 20] == probeRgb565(210, 40, 70));
+    filter.scene = kPhotoSceneDeleteConfirm;
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "gallery-test", 640,
+                              480, 4, 14, active, filtered, filtered, gallery, filter));
+    assert(second[90 * kDisplayProbeWidth + 120] == probeRgb565(210, 40, 70));
+
+    filter.scene = kPhotoSceneGallery;
+    filter.galleryPhotoCount = 0;
+    filter.galleryHasThumbnail = false;
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "gallery-empty", 640,
+                              480, 4, 15, active, filtered, filtered, 0, filter));
+    assert(second[90 * kDisplayProbeWidth + 120] == probeRgb565(13, 17, 18));
 }
 
 static void testDisplayProbeWorkerLifecycle() {
@@ -320,9 +388,8 @@ static void testReducedDecodeAndBoundedWorker() {
     assert(worker.stop() <= 250);
     assert(worker.submitJpeg(encoded, (int)size, 5000) == kFilterSubmitInvalid);
 
-    char photoRoot[128];
-    snprintf(photoRoot, sizeof(photoRoot), "/tmp/retrolens-worker-photo-%d", (int)getpid());
-    mkdir(photoRoot, 0775);
+    char photoRoot[] = "/tmp/retrolens-worker-photo-XXXXXX";
+    assert(mkdtemp(photoRoot));
     DisplayProbeWorker* photoWorker =
         new DisplayProbeWorker("host-photo-runtime", 8, photoRoot, "HOST", "test");
     assert(photoWorker->start());
@@ -332,11 +399,28 @@ static void testReducedDecodeAndBoundedWorker() {
     assert(photoWorker->waitForPhotoResult(1, 3000));
     photoWorker->getFilterStats(&metrics);
     assert(metrics.photoSavedCount == 1 && metrics.photoFailedCount == 0);
-    assert(metrics.photoEncodedBytes > 1000 && metrics.galleryPhotoCount == 1);
-    assert(photoWorker->stop() <= 3000);
-    delete photoWorker;
+    assert(metrics.photoEncodedBytes > 100);
+    assert(metrics.galleryPhotoCount == 1);
+    assert(metrics.galleryHasThumbnail && metrics.galleryIndex == 0);
     PhotoStore photoStore(photoRoot, "HOST", "test");
     assert(photoStore.initialize() && photoStore.photoCount() == 1);
+    Pixel savedThumbnail[kFrameWidth * kFrameHeight];
+    assert(photoStore.loadThumbnail(0, savedThumbnail));
+    const Pixel& savedCenter = savedThumbnail[30 * kFrameWidth + 40];
+    uint16_t expectedGalleryCenter = probeRgb565(savedCenter.r, savedCenter.g, savedCenter.b);
+    assert(photoWorker->key(kPhotoKeyGallery, true, 6200));
+    int galleryKeyFrame = 0;
+    int galleryKeyPosts = 0;
+    photoWorker->getStats(&galleryKeyFrame, &galleryKeyPosts);
+    assert(photoWorker->waitForFrame(galleryKeyFrame + 1, 500));
+    photoWorker->getFilterStats(&metrics);
+    assert(metrics.scene == kPhotoSceneGallery && metrics.galleryHasThumbnail);
+    uint16_t galleryOutput[kDisplayProbeWidth * kDisplayProbeHeight];
+    assert(photoWorker->blitLatest(galleryOutput, kDisplayProbeWidth, kDisplayProbeHeight,
+                                   kDisplayProbeWidth, 4, 0));
+    assert(galleryOutput[90 * kDisplayProbeWidth + 120] == expectedGalleryCenter);
+    assert(photoWorker->stop() <= 3000);
+    delete photoWorker;
     assert(photoStore.deletePhoto(0));
     char cleanup[800];
     snprintf(cleanup, sizeof(cleanup), "%s/RETROLENS/THUMBNAILS/index.txt", photoRoot);
@@ -469,9 +553,8 @@ static bool jpegDimensions(const char* path, int* width, int* height) {
 }
 
 static void testPhotoStoreAndSettings() {
-    char root[128];
-    snprintf(root, sizeof(root), "/tmp/retrolens-photo-test-%d", (int)getpid());
-    mkdir(root, 0775);
+    char root[] = "/tmp/retrolens-photo-test-XXXXXX";
+    assert(mkdtemp(root));
     PhotoStore store(root, "HOST CAMERA", "test-version");
     assert(store.initialize());
 

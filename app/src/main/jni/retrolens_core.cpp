@@ -436,6 +436,62 @@ bool blitRgb565(const uint16_t* source, int sourceWidth, int sourceHeight, void*
     return false;
 }
 
+bool blitRgb565CenterCrop(const uint16_t* source, int sourceWidth, int sourceHeight,
+                          void* destination, int destinationWidth, int destinationHeight,
+                          int destinationStride, int destinationFormat) {
+    if (!source || !destination || sourceWidth <= 0 || sourceHeight <= 0 || destinationWidth <= 0 ||
+        destinationHeight <= 0 || destinationStride < destinationWidth)
+        return false;
+
+    int cropLeft = 0;
+    int cropTop = 0;
+    int cropWidth = sourceWidth;
+    int cropHeight = sourceHeight;
+    if ((int64_t)destinationWidth * sourceHeight > (int64_t)destinationHeight * sourceWidth) {
+        cropHeight = sourceWidth * destinationHeight / destinationWidth;
+        if (cropHeight < 1)
+            cropHeight = 1;
+        cropTop = (sourceHeight - cropHeight) / 2;
+    } else if ((int64_t)destinationWidth * sourceHeight <
+               (int64_t)destinationHeight * sourceWidth) {
+        cropWidth = sourceHeight * destinationWidth / destinationHeight;
+        if (cropWidth < 1)
+            cropWidth = 1;
+        cropLeft = (sourceWidth - cropWidth) / 2;
+    }
+
+    if (destinationFormat == 4) {
+        uint16_t* pixels = (uint16_t*)destination;
+        for (int y = 0; y < destinationHeight; y++) {
+            int sourceY = cropTop + y * cropHeight / destinationHeight;
+            uint16_t* destinationRow = pixels + y * destinationStride;
+            for (int x = 0; x < destinationWidth; x++) {
+                int sourceX = cropLeft + x * cropWidth / destinationWidth;
+                destinationRow[x] = source[sourceY * sourceWidth + sourceX];
+            }
+        }
+        return true;
+    }
+    if (destinationFormat == 1 || destinationFormat == 2) {
+        uint32_t* pixels = (uint32_t*)destination;
+        for (int y = 0; y < destinationHeight; y++) {
+            int sourceY = cropTop + y * cropHeight / destinationHeight;
+            uint32_t* destinationRow = pixels + y * destinationStride;
+            for (int x = 0; x < destinationWidth; x++) {
+                int sourceX = cropLeft + x * cropWidth / destinationWidth;
+                uint16_t color = source[sourceY * sourceWidth + sourceX];
+                int red = ((color >> 11) & 31) * 255 / 31;
+                int green = ((color >> 5) & 63) * 255 / 63;
+                int blue = (color & 31) * 255 / 31;
+                destinationRow[x] =
+                    0xff000000U | ((uint32_t)blue << 16) | ((uint32_t)green << 8) | (uint32_t)red;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 void jsonEscape(FILE* output, const char* value) {
     fputc('"', output);
     if (value)

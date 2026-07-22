@@ -163,8 +163,11 @@ public final class RetroLensActivity extends BaseActivity
     mainHandler.post(new Runnable() {
       @Override
       public void run() {
-        if (resumed)
+        if (resumed) {
+          displayProbeController.stop();
+          displayProbeReady = false;
           statusView.showError("SEQUENCE UNAVAILABLE", "NORMAL CAPTURE REMAINS ACTIVE");
+        }
         Logger.error("RetroLens: sequence unavailable " + reason);
       }
     });

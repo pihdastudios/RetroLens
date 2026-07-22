@@ -84,7 +84,7 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
       surfaceFormat_(0), inputPending_(false), inputInUse_(false), hasPrevious_(false),
       hasRaw_(false), styleDirty_(false), selectedStyle_(0), intensity_(100), parameterIndex_(0),
       scene_(kPhotoSceneCamera), controlsVisible_(true), compare_(false), focusActive_(false),
-      favoritesLo_(0), favoritesHi_(0), recentCount_(0), galleryIndex_(0),
+      favoritesLo_(0), favoritesHi_(0), recentCount_(0), galleryIndex_(0), galleryLoadedIndex_(-1),
       galleryHasThumbnail_(false), settingsDirty_(false), diagnostics_(false), touchStartX_(0),
       touchStartY_(0), touchStartMs_(0), jpegLength_(0), jpegTimestampMs_(0),
       lastDecodedTimestampMs_(0), firstProcessedTimestampMs_(0), lastProcessedTimestampMs_(0),
@@ -288,6 +288,7 @@ bool DisplayProbeWorker::key(int keyValue, bool down, int64_t timestampMs) {
                 galleryIndex_ =
                     (galleryIndex_ + direction + galleryPhotoCount_) % galleryPhotoCount_;
                 galleryHasThumbnail_ = false;
+                galleryLoadedIndex_ = -1;
                 queueGalleryLoadLocked();
             }
         } else if (scene_ == kPhotoSceneControls) {
@@ -329,8 +330,11 @@ bool DisplayProbeWorker::key(int keyValue, bool down, int64_t timestampMs) {
         scene_ = scene_ == kPhotoSceneGallery ? kPhotoSceneCamera : kPhotoSceneGallery;
         if (scene_ == kPhotoSceneGallery) {
             galleryIndex_ = 0;
-            galleryHasThumbnail_ = false;
-            queueGalleryLoadLocked();
+            if (!galleryHasThumbnail_ || galleryLoadedIndex_ != 0) {
+                galleryHasThumbnail_ = false;
+                galleryLoadedIndex_ = -1;
+                queueGalleryLoadLocked();
+            }
         }
     } else if (keyValue == kPhotoKeyBack) {
         if (scene_ == kPhotoSceneGallery) {
@@ -445,8 +449,8 @@ void DisplayProbeWorker::setFocus(bool active) {
 bool DisplayProbeWorker::blitLatest(void* destination, int width, int height, int stride,
                                     int format, int* frameNumber) {
     pthread_mutex_lock(&mutex_);
-    bool result = blitRgb565(pixels_, kDisplayProbeWidth, kDisplayProbeHeight, destination, width,
-                             height, stride, format);
+    bool result = blitRgb565CenterCrop(pixels_, kDisplayProbeWidth, kDisplayProbeHeight,
+                                       destination, width, height, stride, format);
     if (result)
         postCount_++;
     if (frameNumber)
@@ -572,6 +576,11 @@ void DisplayProbeWorker::photoRun() {
                 photoSavedCount_++;
                 photoEncodedBytes_ = encodedBytes;
                 galleryPhotoCount_ = photoStore_.photoCount();
+                galleryIndex_ = 0;
+                galleryLoadedIndex_ = 0;
+                galleryHasThumbnail_ = true;
+                galleryPreset_ = presetIndex;
+                memcpy(galleryThumbnail_, photoFrame_, sizeof(galleryThumbnail_));
             } else {
                 photoStatus_ = kPhotoWriteFailed;
                 photoFailedCount_++;
@@ -581,6 +590,9 @@ void DisplayProbeWorker::photoRun() {
             if (ok) {
                 memcpy(galleryThumbnail_, photoFrame_, sizeof(galleryThumbnail_));
                 galleryPreset_ = entry.presetIndex;
+                galleryLoadedIndex_ = galleryIndex;
+            } else {
+                galleryLoadedIndex_ = -1;
             }
             photoStatus_ = ok ? kPhotoWriteIdle : kPhotoWriteFailed;
         } else if (job == kPhotoJobDelete) {
@@ -588,6 +600,7 @@ void DisplayProbeWorker::photoRun() {
             if (galleryIndex_ >= galleryPhotoCount_)
                 galleryIndex_ = galleryPhotoCount_ > 0 ? galleryPhotoCount_ - 1 : 0;
             galleryHasThumbnail_ = false;
+            galleryLoadedIndex_ = -1;
             scene_ = kPhotoSceneGallery;
             photoStatus_ = ok ? kPhotoWriteDeleted : kPhotoWriteFailed;
             if (galleryPhotoCount_ > 0)

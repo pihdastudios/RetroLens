@@ -66,9 +66,6 @@ extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativePos
     ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
     if (!window)
         return SURFACE_NO_WINDOW;
-    int geometryResult =
-        ANativeWindow_setBuffersGeometry(window, retrolens::kDisplayProbeWidth,
-                                         retrolens::kDisplayProbeHeight, WINDOW_FORMAT_RGB_565);
     ANativeWindow_Buffer buffer;
     if (ANativeWindow_lock(window, &buffer, 0) != 0) {
         ANativeWindow_release(window);
@@ -88,10 +85,10 @@ extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativePos
     int postResult = ANativeWindow_unlockAndPost(window);
     if (status != SURFACE_OK || frameNumber % 80 == 0)
         __android_log_print(ANDROID_LOG_INFO, "RetroLens",
-                            "PhotoRuntime: status=%d geometry=%d surface=%dx%d stride=%d "
+                            "PhotoRuntime: status=%d fullscreen surface=%dx%d stride=%d "
                             "format=%d frame=%d",
-                            status, geometryResult, buffer.width, buffer.height, buffer.stride,
-                            buffer.format, frameNumber);
+                            status, buffer.width, buffer.height, buffer.stride, buffer.format,
+                            frameNumber);
     ANativeWindow_release(window);
     if (postResult != 0 && status == SURFACE_OK)
         status = SURFACE_POST_FAILED;
@@ -164,7 +161,7 @@ extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeGet
     probe->worker.getFilterStats(&metrics);
     jint values[8] = {metrics.selectedPreset,    metrics.photoSavedCount, metrics.photoFailedCount,
                       metrics.photoEncodedBytes, metrics.photoStatus,     metrics.galleryPhotoCount,
-                      metrics.processedFrames,   metrics.droppedFrames};
+                      metrics.processedFrames,   metrics.decodeFailures};
     env->SetIntArrayRegion(output, 0, 8, values);
 }
 

@@ -1,6 +1,6 @@
 # RetroLens
 
-RetroLens is a photo-only retro-effects camera for the Sony a5100 OpenMemories environment. It keeps Sony's normal preview, autofocus, and original JPEG capture while a bounded native C++ engine processes analytical preview frames, renders a compact custom interface, and saves a separate 320x240 RetroLens derivative.
+RetroLens is a photo-only retro-effects camera for the Sony a5100 OpenMemories environment. It keeps Sony's normal preview, autofocus, and original JPEG capture while a bounded native C++ engine processes analytical preview frames, renders a full-screen custom interface, and saves a separate 320x240 RetroLens derivative.
 
 This build deliberately contains no linked video runtime. The Movie button is consumed and reports that video processing is disabled. RetroLens never modifies firmware, calibration data, boot partitions, or Sony originals.
 
@@ -9,8 +9,8 @@ This build deliberately contains no linked video runtime. The Movie button is co
 - All 70 preset graphs, the reduced JPEG path, worker lifecycle, persistence, JPEG output, gallery index, and photo transaction pass host ASan/UBSan tests.
 - The legacy API-10 `armeabi` APK builds and verifies with the pinned toolchain.
 - Earlier staged builds physically proved normal preview/capture, clean CameraSequence shutdown, the 8 FPS native display thread, analytical JPEG delivery, and moving Olive Pocket output on an ILCE-5100.
-- The user reported the latest style panel still updates only in its top-left area, approximately one quarter of the camera display, while the rest remains static black or olive. This geometry defect is intentionally not fixed in this photo-completion build.
-- The new 70-preset UI, settings writes, gallery, and processed derivative have not yet been physically verified. Build or installation success is not hardware proof.
+- The installed photo-runtime candidate displayed moving effects, but only in the deliberately small panel. The user also could not see the processed result in the in-app gallery.
+- The `fullscreen-photo-20260722-i` candidate removes the small-window geometry request, fills the actual locked display buffer, and renders the saved processed thumbnail full-screen in the RetroLens gallery. It is host-tested but has not been installed or physically tested.
 
 Exact staged evidence and preserved recovery hashes are in `DEVICE_FINDINGS.md`.
 
@@ -19,7 +19,8 @@ Exact staged evidence and preserved recovery hashes are in `DEVICE_FINDINGS.md`.
 ```text
 CameraEx -> Sony normal preview SurfaceView -> autofocus + Sony original capture
 CameraSequence worker -> one reusable direct JPEG buffer -> one bounded native JPEG slot
-native process worker -> reduced 80x60 decode -> preset graph + temporal history -> custom UI
+native process worker -> reduced 80x60 decode -> preset graph + temporal history -> 240x180 logical UI
+native post -> center-crop scale into the actual locked full-screen buffer
 native photo worker -> one 80x60 snapshot -> 320x240 JPEG + JSON + thumbnail + atomic index
 ```
 
@@ -48,7 +49,7 @@ From `RetroLens/`:
 ./scripts/build-apk.sh --clean
 ./scripts/verify-apk.sh
 ./scripts/package-release.sh --existing
-./scripts/install.sh releases/RetroLens-1.0.0-photo-runtime.apk
+./scripts/install.sh releases/RetroLens-1.0.0-fullscreen-photo.apk
 ```
 
 The normal build output is `app/build/outputs/apk/RetroLens-debug-1.0.0.apk`. Installation requires a Sony-PMCA-RE-compatible USB mode.
@@ -73,7 +74,7 @@ Touch supports horizontal style swipes, tap-to-hide/show controls, and long-pres
 
 ## Interface and presets
 
-The native UI uses a dark charcoal base, warm text, restrained mint accent, a five-card style browser, quick controls, compare labels, focus and capture state, hidden diagnostics, and an app-only thumbnail gallery. The essential UI is kept inside the known visible top-left 120x90 region while the unresolved physical panel geometry is left unchanged.
+The native UI uses a dark charcoal base, warm text, restrained mint accent, a five-card style browser, quick controls, compare labels, focus and capture state, hidden diagnostics, and an app-only gallery. Its logical 240x180 compositor is center-crop scaled across the actual locked display buffer instead of requesting a small Android window. The normal Sony preview remains underneath and is revealed if surface posting, CameraSequence startup, or repeated analytical decoding fails.
 
 All 70 requested presets ship across Handheld, Computer, Console, Analog TV, Tape, Film, Archive, Print, Digital Decay, Game Era, and Experimental categories. This includes Olive Pocket, Soviet Archive 1978, Piss Filter 2007 / Seventh-Gen Amber, Comic Ink, Newsprint, and Thermal False Color. Presets are declarative bounded graphs using shared integer passes. Thermal and infrared modes are simulated color mappings, not sensor measurements.
 
@@ -97,7 +98,7 @@ Full-resolution post-processing remains disabled until safe discovery of the new
 
 ## Gallery and storage
 
-The gallery indexes at most 48 RetroLens-produced photos and loads one fixed 80x60 thumbnail at a time. It does not scan the full card. Delete requires confirmation and removes only the selected derivative, its sidecar, and its app thumbnail.
+The gallery indexes at most 48 RetroLens-produced photos and loads one fixed 80x60 processed thumbnail at a time. The newest completed save is placed into the gallery slot immediately after the durable transaction, and Playback displays the selected processed image full-screen with its preset and `PROCESSED 320X240` label. It does not scan the full card or register files with Sony's private playback database. Delete requires confirmation and removes only the selected derivative, its sidecar, and its app thumbnail.
 
 ```text
 RETROLENS/
@@ -117,7 +118,7 @@ PicoJPEG reduced decode produces an 80x60 working image, chosen to fit the a5100
 
 ## Troubleshooting and limitations
 
-- Known: the processed panel updates only in the top-left portion on the physical camera. This build does not attempt another geometry change.
+- The earlier small-panel behavior is physically observed. The fullscreen candidate is a new uninstalled build and must not be described as device-proven until its locked-buffer dimensions and complete screen coverage are observed on-camera.
 - A frozen moving area with a working Sony preview indicates a decode/cadence issue. Fn opens rate-limited diagnostics.
 - If `Writing memory` persists after exit, stop testing this candidate and reinstall `releases/RetroLens-1.0.0-safe-preview.apk`; avoid battery removal while the card LED is active unless the camera is irrecoverably wedged.
 - If derivative saving fails, confirm free card space and inspect `RETROLENS/LOG.TXT`. The Sony original should still exist independently.

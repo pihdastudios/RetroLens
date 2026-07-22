@@ -127,6 +127,7 @@ class DisplayProbeWorker {
     int recent_[kRecentPresetCount];
     int recentCount_;
     int galleryIndex_;
+    int galleryLoadedIndex_;
     bool galleryHasThumbnail_;
     bool settingsDirty_;
     bool diagnostics_;

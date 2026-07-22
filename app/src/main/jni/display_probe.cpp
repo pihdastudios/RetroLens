@@ -130,53 +130,57 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
 
     int outstanding = sequence.receivedFrames - sequence.releasedFrames;
     bool imbalance = outstanding < 0 || outstanding > 1;
-    if (filtered && filter.hasFrame) {
-        for (int y = 0; y < height; y++) {
-            int sourceY = y * kFrameHeight / height;
-            for (int x = 0; x < width; x++) {
-                int sourceX = x * kFrameWidth / width;
-                bool showOriginal = original && filter.compare && x < width / 2;
-                const Pixel& source = showOriginal ? original[sourceY * kFrameWidth + sourceX]
-                                                   : filtered[sourceY * kFrameWidth + sourceX];
-                pixels[y * width + x] = probeRgb565(source.r, source.g, source.b);
+    bool galleryScene =
+        filter.scene == kPhotoSceneGallery || filter.scene == kPhotoSceneDeleteConfirm;
+    const Pixel* fullFrame = galleryScene ? (filter.galleryHasThumbnail ? galleryThumbnail : 0)
+                                          : (filter.hasFrame ? filtered : 0);
+    if (filter.hasFrame || galleryScene) {
+        if (fullFrame) {
+            for (int y = 0; y < height; y++) {
+                int sourceY = y * kFrameHeight / height;
+                for (int x = 0; x < width; x++) {
+                    int sourceX = x * kFrameWidth / width;
+                    bool showOriginal =
+                        !galleryScene && original && filter.compare && x < width / 2;
+                    const Pixel& source = showOriginal ? original[sourceY * kFrameWidth + sourceX]
+                                                       : fullFrame[sourceY * kFrameWidth + sourceX];
+                    pixels[y * width + x] = probeRgb565(source.r, source.g, source.b);
+                }
             }
         }
-        const int safeWidth = 120;
-        const int safeHeight = 90;
+        const int drawerWidth = 150;
         const Preset& selected = presetAt(filter.selectedPreset);
         char label[20];
         strncpy(label, selected.name, sizeof(label) - 1);
         label[sizeof(label) - 1] = 0;
-        if (filter.scene == kPhotoSceneGallery || filter.scene == kPhotoSceneDeleteConfirm) {
-            rectangle(pixels, width, height, 0, 0, safeWidth, safeHeight, background);
+        if (galleryScene) {
+            rectangle(pixels, width, height, 0, 0, width, 14, background);
             shadowedText(pixels, width, height, 3, 3, "PHOTO GALLERY", accent, background);
             if (filter.galleryPhotoCount <= 0) {
-                text(pixels, width, height, 3, 30, "NO RETRO PHOTOS", warm);
+                text(pixels, width, height, 72, 82, "NO RETRO PHOTOS", warm);
             } else if (galleryThumbnail && filter.galleryHasThumbnail) {
-                for (int y = 14; y < 68; y++) {
-                    int sourceY = (y - 14) * kFrameHeight / 54;
-                    for (int x = 3; x < 75; x++) {
-                        int sourceX = (x - 3) * kFrameWidth / 72;
-                        const Pixel& source = galleryThumbnail[sourceY * kFrameWidth + sourceX];
-                        pixels[y * width + x] = probeRgb565(source.r, source.g, source.b);
-                    }
-                }
                 char count[24];
                 snprintf(count, sizeof(count), "%d/%d", filter.galleryIndex + 1,
                          filter.galleryPhotoCount);
-                text(pixels, width, height, 80, 18, count, warm);
-                text(pixels, width, height, 80, 34, presetAt(filter.galleryPreset).category,
-                     accent);
-                text(pixels, width, height, 80, 50, "PRESET FAV", warm);
+                text(pixels, width, height, 204, 3, count, warm);
             } else {
-                text(pixels, width, height, 3, 30, "LOADING", accent);
+                text(pixels, width, height, 99, 82, "LOADING", accent);
             }
-            text(pixels, width, height, 3, 76,
-                 filter.scene == kPhotoSceneDeleteConfirm ? "CENTER DELETE  BACK CANCEL"
-                                                          : "LEFT RIGHT  BACK DELETE",
+            rectangle(pixels, width, height, 0, 151, width, height, background);
+            if (filter.galleryPhotoCount > 0) {
+                char galleryPreset[24];
+                strncpy(galleryPreset, presetAt(filter.galleryPreset).name,
+                        sizeof(galleryPreset) - 1);
+                galleryPreset[sizeof(galleryPreset) - 1] = 0;
+                text(pixels, width, height, 3, 155, galleryPreset, accent);
+                text(pixels, width, height, 132, 155, "PROCESSED 320X240", warm);
+            }
+            text(pixels, width, height, 3, 170,
+                 filter.scene == kPhotoSceneDeleteConfirm ? "CENTER DELETE    BACK CANCEL"
+                                                          : "LEFT RIGHT       BACK DELETE",
                  filter.scene == kPhotoSceneDeleteConfirm ? probeRgb565(255, 150, 110) : warm);
         } else if (filter.scene == kPhotoSceneControls) {
-            rectangle(pixels, width, height, 0, 0, safeWidth, safeHeight, background);
+            rectangle(pixels, width, height, 0, 0, drawerWidth, height, background);
             text(pixels, width, height, 3, 3, "QUICK CONTROL", accent);
             text(pixels, width, height, 3, 17, label, warm);
             static const char* kParameters[] = {"INTENSITY", "CONTRAST", "GRAIN", "MOTION"};
@@ -193,9 +197,9 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
                 bar = 100;
             rectangle(pixels, width, height, 3, 47, 3 + bar, 54, accent);
             text(pixels, width, height, 3, 62, "UP DOWN SELECT", warm);
-            text(pixels, width, height, 3, 77, "CENTER CLOSE", accent);
+            text(pixels, width, height, 3, 166, "CENTER CLOSE", accent);
         } else if (filter.scene == kPhotoSceneBrowser) {
-            rectangle(pixels, width, height, 0, 0, safeWidth, safeHeight, background);
+            rectangle(pixels, width, height, 0, 0, drawerWidth, height, background);
             text(pixels, width, height, 3, 3, "STYLE BROWSER", accent);
             for (int row = -2; row <= 2; row++) {
                 int index = (filter.selectedPreset + row + presetCount()) % presetCount();
@@ -205,7 +209,7 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
                 text(pixels, width, height, 3, 18 + (row + 2) * 14, name, row == 0 ? accent : warm);
             }
         } else if (filter.scene == kPhotoSceneDiagnostics) {
-            rectangle(pixels, width, height, 0, 0, safeWidth, safeHeight, background);
+            rectangle(pixels, width, height, 0, 0, drawerWidth, height, background);
             text(pixels, width, height, 3, 3, "DIAGNOSTICS", accent);
             char line[32];
             snprintf(line, sizeof(line), "FPS %d.%d D%d F%d", filter.processedFpsTenths / 10,
@@ -220,21 +224,21 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
             snprintf(line, sizeof(line), "SAVE %d FAIL %d", filter.photoSavedCount,
                      filter.photoFailedCount);
             text(pixels, width, height, 3, 63, line, warm);
-            text(pixels, width, height, 3, 78, "FN CLOSE", accent);
+            text(pixels, width, height, 3, 166, "FN CLOSE", accent);
         } else if (filter.controlsVisible) {
-            rectangle(pixels, width, height, 0, 0, safeWidth, 12, background);
+            rectangle(pixels, width, height, 0, 0, width, 12, background);
             text(pixels, width, height, 2, 2, label, accent);
             if (filter.favorite)
-                text(pixels, width, height, 106, 2, "F", warm);
-            rectangle(pixels, width, height, 0, 62, safeWidth, safeHeight, background);
-            text(pixels, width, height, 2, 65, selected.category, warm);
-            text(pixels, width, height, 2, 78, "< STYLE >  CENTER", accent);
+                text(pixels, width, height, 226, 2, "F", warm);
+            rectangle(pixels, width, height, 0, 158, width, height, background);
+            text(pixels, width, height, 2, 163, selected.category, warm);
+            text(pixels, width, height, 132, 163, "< STYLE > CENTER", accent);
             if (filter.focusActive)
-                text(pixels, width, height, 82, 17, "FOCUS", accent);
+                text(pixels, width, height, 204, 17, "FOCUS", accent);
         }
-        if (filter.compare) {
+        if (!galleryScene && filter.compare) {
             text(pixels, width, height, 2, 14, "ORIGINAL", warm);
-            text(pixels, width, height, 64, 14, "RETRO", accent);
+            text(pixels, width, height, width / 2 + 3, 14, "RETROLENS", accent);
         }
         const char* photoMessage = 0;
         if (filter.photoStatus == 1)
@@ -251,15 +255,15 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
             photoMessage = "PHOTO ONLY - VIDEO OFF";
         else if (filter.photoStatus == 8)
             photoMessage = "RETRO PHOTO UNAVAILABLE";
-        if (photoMessage) {
-            rectangle(pixels, width, height, 0, 39, safeWidth, 53, background);
-            text(pixels, width, height, 3, 42, photoMessage,
+        if (photoMessage && !galleryScene) {
+            rectangle(pixels, width, height, 30, 78, 210, 94, background);
+            text(pixels, width, height, 35, 82, photoMessage,
                  filter.photoStatus == 3 || filter.photoStatus == 8 ? probeRgb565(255, 150, 110)
                                                                     : accent);
         }
         if (imbalance || filter.decodeError) {
-            rectangle(pixels, width, height, 0, 27, safeWidth, 58, background);
-            text(pixels, width, height, 3, 38, imbalance ? "BUFFER IMBALANCE" : "DECODE ERROR",
+            rectangle(pixels, width, height, 30, 62, 210, 96, background);
+            text(pixels, width, height, 55, 75, imbalance ? "BUFFER IMBALANCE" : "DECODE ERROR",
                  probeRgb565(255, 150, 110));
         }
         return true;
