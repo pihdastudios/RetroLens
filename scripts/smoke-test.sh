@@ -53,11 +53,21 @@ grep -q 'EXTERNAL_LOGGING_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
 grep -q 'StorageController.probe' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
-grep -q 'getFD().sync()' \
+grep -q 'renamed probe could not be read back' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StorageController.java"
-grep -q 'storageRoot, Build.MODEL' \
+if grep -q 'getFD().sync()' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StorageController.java"; then
+    echo "Legacy Java storage readiness must not require descriptor sync" >&2
+    exit 1
+fi
+grep -q 'storageRoot, storageStatus, Build.MODEL' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"
+grep -q 'MAX_STORAGE_ATTEMPTS = 3' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'if (mode == MODE_READY)' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StartupStatusView.java"
 grep -q 'kPhotoStorageIndexFailed' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
+grep -q 'controlsVisibleUntilMs_' "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
 grep -q 'cleanTemporaryFiles' "$PROJECT_DIR/app/src/main/jni/photo_store.cpp"
 grep -q 'rebuildIndex' "$PROJECT_DIR/app/src/main/jni/photo_store.cpp"
 grep -q 'nativeProbeSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"

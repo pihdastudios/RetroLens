@@ -19,7 +19,8 @@ enum PhotoStorageState {
     kPhotoStorageInvalidRoot = 2,
     kPhotoStorageDirectoryFailed = 3,
     kPhotoStorageInsufficientSpace = 4,
-    kPhotoStorageIndexFailed = 5
+    kPhotoStorageIndexFailed = 5,
+    kPhotoStorageWriteProbeFailed = 6
 };
 
 enum PhotoWriteStage {

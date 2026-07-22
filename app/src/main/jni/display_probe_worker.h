@@ -33,7 +33,8 @@ enum PhotoWriteState {
     kPhotoWriteLoading = 5,
     kPhotoWriteDeleted = 6,
     kPhotoWriteVideoDisabled = 7,
-    kPhotoWriteUnavailable = 8
+    kPhotoWriteUnavailable = 8,
+    kPhotoWriteNoFrame = 9
 };
 
 enum PhotoUiKey {
@@ -54,7 +55,8 @@ enum PhotoUiKey {
 class DisplayProbeWorker {
   public:
     DisplayProbeWorker(const char* buildId, int intervalMs, const char* storageRoot,
-                       const char* cameraModel, const char* versionName);
+                       const char* cameraModel, const char* versionName,
+                       int storageStatus = kPhotoStorageReady);
     ~DisplayProbeWorker();
     bool start();
     int stop();
@@ -131,6 +133,8 @@ class DisplayProbeWorker {
     bool galleryHasThumbnail_;
     bool settingsDirty_;
     bool diagnostics_;
+    int64_t controlsVisibleUntilMs_;
+    int64_t photoMessageUntilMs_;
     float touchStartX_;
     float touchStartY_;
     int64_t touchStartMs_;

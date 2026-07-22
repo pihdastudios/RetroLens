@@ -24,6 +24,30 @@ public final class RetroLensActivity extends BaseActivity
   private int lastJpegBytes;
   private long firstFrameTimestampMs;
   private long lastFrameTimestampMs;
+  private StorageController.Result storageResult;
+  private int storageAttempt;
+  private static final int MAX_STORAGE_ATTEMPTS = 3;
+  private final Runnable storageProbe = new Runnable() {
+    @Override
+    public void run() {
+      if (!resumed || storageResult != null)
+        return;
+      storageAttempt++;
+      StorageController.Result result = StorageController.probe(NativeBridge.BUILD_ID);
+      Logger.info("Storage: attempt=" + storageAttempt + " status=" + result.status + " root="
+          + result.root + " freeBytes=" + result.freeBytes + " detail=" + result.detail);
+      if (result.isReady() || storageAttempt >= MAX_STORAGE_ATTEMPTS) {
+        storageResult = result;
+        Logger.configure(result);
+        Logger.flush();
+        displayProbeController.configureStorage(result);
+        startRuntimeIfReady();
+      } else {
+        long delayMs = storageAttempt == 1 ? 250L : 750L;
+        mainHandler.postDelayed(this, delayMs);
+      }
+    }
+  };
 
   @Override
   protected void onCreate(Bundle state) {
@@ -31,16 +55,11 @@ public final class RetroLensActivity extends BaseActivity
     super.onCreate(state);
     setContentView(R.layout.activity_retrolens);
     statusView = (StartupStatusView) findViewById(R.id.startupStatus);
-    StorageController.Result storage = StorageController.probe(NativeBridge.BUILD_ID);
-    Logger.configure(storage);
     Logger.startSession(NativeBridge.BUILD_ID);
-    Logger.info("Storage: status=" + storage.status + " root=" + storage.root
-        + " freeBytes=" + storage.freeBytes + " detail=" + storage.detail);
-    Logger.flush();
     cameraController = new SonyCameraController(
         (android.view.SurfaceView) findViewById(R.id.sonyPreviewSurface), this);
     displayProbeController = new NativeDisplayProbeController(
-        (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this, storage);
+        (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this);
     mainHandler = new Handler();
     Logger.info("RetroLens: photo runtime created model=" + Build.MODEL + " sdk="
         + Build.VERSION.SDK_INT + " abi=" + Build.CPU_ABI + " build=" + NativeBridge.BUILD_ID);
@@ -56,10 +75,13 @@ public final class RetroLensActivity extends BaseActivity
     resumed = true;
     displayProbeReady = false;
     readyCamera = null;
+    storageResult = null;
+    storageAttempt = 0;
     resetSequenceMetrics();
     setAutoPowerOffMode(false);
     statusView.showStarting();
     cameraController.start();
+    mainHandler.post(storageProbe);
     Logger.info("RetroLens: photo runtime resume complete");
   }
 
@@ -91,9 +113,7 @@ public final class RetroLensActivity extends BaseActivity
     if (!resumed)
       return;
     readyCamera = cameraEx;
-    statusView.showReady();
-    displayProbeController.start();
-    startSequenceIfReady();
+    startRuntimeIfReady();
     Logger.info("RetroLens: Sony normal preview ready");
   }
 
@@ -103,7 +123,6 @@ public final class RetroLensActivity extends BaseActivity
       return;
     if (status == NativeBridge.SURFACE_OK) {
       displayProbeReady = true;
-      statusView.showTransient("NATIVE THREAD OK", "STARTING ANALYTICAL ACQUISITION", 1000L);
       startSequenceIfReady();
     } else {
       statusView.showError("NATIVE PROBE FAILED  E" + status, "SONY PREVIEW REMAINS ACTIVE");
@@ -111,17 +130,17 @@ public final class RetroLensActivity extends BaseActivity
   }
 
   @Override
+  public void onProcessedPreviewReady() {
+    if (resumed)
+      statusView.showReady();
+  }
+
+  @Override
   public void onSequenceStarted(CameraSequenceFrameSource source) {
     if (!isCurrentSource(source))
       return;
     updateSequenceMetrics(NativeDisplayProbeController.SEQUENCE_ACTIVE);
-    mainHandler.post(new Runnable() {
-      @Override
-      public void run() {
-        if (resumed)
-          statusView.showTransient("SEQUENCE ACTIVE", "WAITING FOR JPEG FRAMES", 900L);
-      }
-    });
+    Logger.info("RetroLens: analytical sequence active");
   }
 
   @Override
@@ -129,13 +148,7 @@ public final class RetroLensActivity extends BaseActivity
       CameraSequenceFrameSource source, final String format, final int length) {
     if (!isCurrentSource(source))
       return;
-    mainHandler.post(new Runnable() {
-      @Override
-      public void run() {
-        if (resumed)
-          statusView.showTransient("ANALYTICAL " + format, length + " BYTES", 1200L);
-      }
-    });
+    Logger.info("RetroLens: first analytical frame format=" + format + " bytes=" + length);
   }
 
   @Override
@@ -189,7 +202,6 @@ public final class RetroLensActivity extends BaseActivity
   protected boolean onFocusKeyDown() {
     cameraController.focus(true);
     displayProbeController.setFocus(true);
-    statusView.showTransient("FOCUS", "HALF PRESS", 350L);
     return true;
   }
 
@@ -204,15 +216,9 @@ public final class RetroLensActivity extends BaseActivity
   protected boolean onShutterKeyDown() {
     displayProbeController.key(NativeBridge.KEY_CAPTURE, true);
     if (cameraController.capture()) {
-      int photoStatus = displayProbeController.requestPhoto();
-      if (photoStatus == NativeBridge.PHOTO_QUEUED)
-        statusView.showTransient("CAPTURE", "SONY ORIGINAL + RETRO DERIVATIVE", 900L);
-      else if (photoStatus == NativeBridge.PHOTO_BUSY)
-        statusView.showTransient("SONY CAPTURED", "RETRO PHOTO WRITER BUSY", 1000L);
-      else
-        statusView.showTransient("SONY SAVED", "RETRO STORAGE UNAVAILABLE", 1000L);
+      displayProbeController.requestPhoto();
     } else {
-      statusView.showTransient("CAPTURE UNAVAILABLE", "WAIT FOR CAMERA", 900L);
+      Logger.error("RetroLens: Sony capture unavailable");
     }
     return true;
   }
@@ -227,7 +233,6 @@ public final class RetroLensActivity extends BaseActivity
   @Override
   protected boolean onMovieKeyDown() {
     displayProbeController.key(NativeBridge.KEY_RECORD, true);
-    statusView.showTransient("PHOTO MODE", "VIDEO PROCESSING DISABLED", 1400L);
     Logger.info("RetroLens: movie key ignored in photo-only runtime");
     return true;
   }
@@ -378,6 +383,12 @@ public final class RetroLensActivity extends BaseActivity
       updateSequenceMetrics(NativeDisplayProbeController.SEQUENCE_ERROR);
       statusView.showError("SEQUENCE START FAILED", "NORMAL CAPTURE REMAINS ACTIVE");
     }
+  }
+
+  private void startRuntimeIfReady() {
+    if (!resumed || readyCamera == null || storageResult == null || displayProbeReady)
+      return;
+    displayProbeController.start();
   }
 
   private boolean stopSequence(CameraSequenceFrameSource source) {

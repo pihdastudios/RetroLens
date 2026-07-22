@@ -224,6 +224,10 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
             snprintf(line, sizeof(line), "SAVE %d FAIL %d", filter.photoSavedCount,
                      filter.photoFailedCount);
             text(pixels, width, height, 3, 63, line, warm);
+            snprintf(line, sizeof(line), "CARD S%d W%d E%d", filter.photoStorageState,
+                     filter.photoWriteStage, filter.photoWriteError);
+            text(pixels, width, height, 3, 78, line,
+                 filter.photoStorageState == 1 ? accent : probeRgb565(255, 150, 110));
             text(pixels, width, height, 3, 166, "FN CLOSE", accent);
         } else if (filter.controlsVisible) {
             rectangle(pixels, width, height, 0, 0, width, 12, background);
@@ -253,8 +257,19 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
             photoMessage = "PHOTO DELETED";
         else if (filter.photoStatus == 7)
             photoMessage = "PHOTO ONLY - VIDEO OFF";
-        else if (filter.photoStatus == 8)
-            photoMessage = "SONY SAVED RETRO STORAGE OFF";
+        else if (filter.photoStatus == 8) {
+            if (filter.photoStorageState == 3)
+                photoMessage = "RETRO FOLDER FAILED";
+            else if (filter.photoStorageState == 4)
+                photoMessage = "RETRO CARD LOW SPACE";
+            else if (filter.photoStorageState == 5)
+                photoMessage = "RETRO INDEX FAILED";
+            else if (filter.photoStorageState == 6)
+                photoMessage = "RETRO WRITE TEST FAILED";
+            else
+                photoMessage = "RETRO CARD NOT READY";
+        } else if (filter.photoStatus == 9)
+            photoMessage = "RETRO FRAME NOT READY";
         if (photoMessage && !galleryScene) {
             rectangle(pixels, width, height, 30, 78, 210, 94, background);
             text(pixels, width, height, 35, 82, photoMessage,
@@ -265,6 +280,18 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
             rectangle(pixels, width, height, 30, 62, 210, 96, background);
             text(pixels, width, height, 55, 75, imbalance ? "BUFFER IMBALANCE" : "DECODE ERROR",
                  probeRgb565(255, 150, 110));
+        }
+        if (!galleryScene && filter.focusActive) {
+            int centerX = width / 2;
+            int centerY = height / 2;
+            rectangle(pixels, width, height, centerX - 18, centerY - 12, centerX - 8, centerY - 11,
+                      accent);
+            rectangle(pixels, width, height, centerX + 8, centerY - 12, centerX + 18, centerY - 11,
+                      accent);
+            rectangle(pixels, width, height, centerX - 18, centerY + 11, centerX - 8, centerY + 12,
+                      accent);
+            rectangle(pixels, width, height, centerX + 8, centerY + 11, centerX + 18, centerY + 12,
+                      accent);
         }
         return true;
     }

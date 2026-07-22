@@ -241,9 +241,16 @@ static void testDisplayProbeRaster() {
     filter.decodeMs = 6;
     filter.filterMs = 1;
     filter.selectedPreset = findPreset("olive_pocket");
+    filter.controlsVisible = false;
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "filter-probe", 240,
                               180, 4, 11, active, filtered, filtered, 0, filter));
     assert(checksum16(second, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
+    uint16_t hiddenUi[kDisplayProbeWidth * kDisplayProbeHeight];
+    memcpy(hiddenUi, second, sizeof(hiddenUi));
+    filter.controlsVisible = true;
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "filter-probe", 240,
+                              180, 4, 11, active, filtered, filtered, 0, filter));
+    assert(memcmp(hiddenUi, second, 12 * kDisplayProbeWidth * sizeof(uint16_t)) != 0);
 
     const int sourceX = 40;
     const int sourceY = 30;
@@ -385,6 +392,28 @@ static void testReducedDecodeAndBoundedWorker() {
     assert(worker.changeStyle(-1) == presetCount() - 1);
     worker.getFilterStats(&metrics);
     assert(metrics.styleChanges == kFilterProbeStyleCount + 1);
+    int uiFrame = 0;
+    int uiPosts = 0;
+    worker.getStats(&uiFrame, &uiPosts);
+    assert(worker.key(kPhotoKeyNext, true, 1));
+    worker.getFilterStats(&metrics);
+    assert(metrics.controlsVisible);
+    assert(worker.waitForFrame(uiFrame + 1, 500));
+    worker.getFilterStats(&metrics);
+    assert(!metrics.controlsVisible);
+    assert(worker.key(kPhotoKeyConfirm, true, 1));
+    worker.getStats(&uiFrame, &uiPosts);
+    assert(worker.waitForFrame(uiFrame + 1, 500));
+    worker.getFilterStats(&metrics);
+    assert(metrics.scene == kPhotoSceneControls && metrics.controlsVisible);
+    assert(worker.key(kPhotoKeyConfirm, true, 1));
+    assert(worker.key(kPhotoKeyRecord, true, 1));
+    worker.getFilterStats(&metrics);
+    assert(metrics.photoStatus == kPhotoWriteVideoDisabled);
+    worker.getStats(&uiFrame, &uiPosts);
+    assert(worker.waitForFrame(uiFrame + 1, 500));
+    worker.getFilterStats(&metrics);
+    assert(metrics.photoStatus == kPhotoWriteIdle);
     assert(worker.stop() <= 250);
     assert(worker.submitJpeg(encoded, (int)size, 5000) == kFilterSubmitInvalid);
 
@@ -435,13 +464,13 @@ static void testReducedDecodeAndBoundedWorker() {
     rmdir(cleanup);
     rmdir(photoRoot);
 
-    DisplayProbeWorker unavailableWorker("host-storage-failure", 8, "", "HOST", "test");
+    DisplayProbeWorker unavailableWorker("host-storage-failure", 8, "", "HOST", "test", 4);
     assert(unavailableWorker.start());
     assert(unavailableWorker.submitJpeg(encoded, (int)size, 7000) == kFilterSubmitAccepted);
     assert(unavailableWorker.waitForProcessedFrame(1, 1000));
     assert(unavailableWorker.requestPhoto(7123) == kPhotoRequestUnavailable);
     unavailableWorker.getFilterStats(&metrics);
-    assert(metrics.photoStorageState == kPhotoStorageInvalidRoot);
+    assert(metrics.photoStorageState == kPhotoStorageWriteProbeFailed);
     assert(metrics.photoSavedCount == 0 && metrics.photoFailedCount == 0);
     assert(unavailableWorker.stop() <= 250);
     delete[] encoded;

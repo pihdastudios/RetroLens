@@ -68,6 +68,8 @@ public final class StartupStatusView extends View {
   @Override
   protected void onDraw(Canvas canvas) {
     super.onDraw(canvas);
+    if (mode == MODE_READY)
+      return;
     int width = getWidth();
     int height = getHeight();
 
@@ -79,16 +81,6 @@ public final class StartupStatusView extends View {
     paint.setTextSize(13.0f);
     paint.setColor(Color.rgb(66, 232, 188));
     canvas.drawText("PHOTO ENGINE", width - 150, 26, paint);
-
-    if (mode == MODE_READY) {
-      paint.setColor(Color.argb(155, 13, 17, 18));
-      canvas.drawRect(0, height - 34, width, height, paint);
-      paint.setTextSize(12.0f);
-      paint.setColor(Color.rgb(220, 216, 200));
-      canvas.drawText(
-          "PHOTO ONLY / CENTER CONTROLS / MENU STYLES / PLAY GALLERY", 20, height - 12, paint);
-      return;
-    }
 
     int panelTop = height / 2 - 58;
     int panelBottom = height / 2 + 58;

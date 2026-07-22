@@ -3,6 +3,7 @@ package io.pihda.retrolens;
 import android.os.Environment;
 import android.os.StatFs;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 
@@ -39,13 +40,7 @@ public final class StorageController {
     File external = Environment.getExternalStorageDirectory();
     if (external == null)
       return failure(ROOT_UNAVAILABLE, "", -1L, "external root is null");
-    final File root;
-    try {
-      root = external.getCanonicalFile();
-    } catch (IOException exception) {
-      return failure(ROOT_UNAVAILABLE, external.getAbsolutePath(), -1L,
-          "canonical path failed: " + exception.getMessage());
-    }
+    File root = external.getAbsoluteFile();
     File base = new File(root, "RETROLENS");
     File config = new File(base, "CONFIG");
     File photos = new File(base, "PHOTOS");
@@ -65,12 +60,18 @@ public final class StorageController {
         output.write(
             ("RetroLens " + buildId + "\n" + root.getAbsolutePath() + "\n").getBytes("UTF-8"));
         output.flush();
-        output.getFD().sync();
       } finally {
         output.close();
       }
       if (!temporary.renameTo(completed) || !completed.isFile() || completed.length() == 0L)
         throw new IOException("atomic rename verification failed");
+      FileInputStream input = new FileInputStream(completed);
+      try {
+        if (input.read() < 0)
+          throw new IOException("renamed probe could not be read back");
+      } finally {
+        input.close();
+      }
     } catch (IOException exception) {
       temporary.delete();
       completed.delete();

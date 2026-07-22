@@ -26,7 +26,14 @@ static bool makeDirectory(const char* path) {
 static bool flushAndClose(FILE* file) {
     if (!file)
         return false;
-    bool ok = fflush(file) == 0 && fsync(fileno(file)) == 0;
+    bool ok = fflush(file) == 0;
+    if (ok && fsync(fileno(file)) != 0) {
+        int syncError = errno;
+        ok = syncError == EINVAL || syncError == ENOSYS;
+#ifdef ENOTSUP
+        ok = ok || syncError == ENOTSUP;
+#endif
+    }
     if (fclose(file) != 0)
         ok = false;
     return ok;
@@ -104,7 +111,8 @@ PhotoStorageState PhotoStore::initialize() {
         storageState_ = kPhotoStorageDirectoryFailed;
         return storageState_;
     }
-    if (freeBytes() < (int64_t)64 * 1024 * 1024) {
+    int64_t availableBytes = freeBytes();
+    if (availableBytes >= 0 && availableBytes < (int64_t)64 * 1024 * 1024) {
         storageState_ = kPhotoStorageInsufficientSpace;
         return storageState_;
     }
@@ -218,7 +226,8 @@ bool PhotoStore::savePhoto(const Pixel* frame, int presetIndex, int intensity,
     if (storageState_ != kPhotoStorageReady || !frame || !scaled || !encoded ||
         encodedCapacity <= 0)
         return false;
-    if (freeBytes() < (int64_t)64 * 1024 * 1024) {
+    int64_t availableBytes = freeBytes();
+    if (availableBytes >= 0 && availableBytes < (int64_t)64 * 1024 * 1024) {
         storageState_ = kPhotoStorageInsufficientSpace;
         return false;
     }

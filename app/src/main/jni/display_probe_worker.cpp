@@ -78,14 +78,16 @@ static void applyCaptureTexture(Pixel* frame, const Preset& preset) {
 } // namespace
 
 DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, const char* storageRoot,
-                                       const char* cameraModel, const char* versionName)
+                                       const char* cameraModel, const char* versionName,
+                                       int storageStatus)
     : running_(false), threadStarted_(false), photoRunning_(false), photoThreadStarted_(false),
       intervalMs_(intervalMs), frameCount_(0), postCount_(0), surfaceWidth_(0), surfaceHeight_(0),
       surfaceFormat_(0), inputPending_(false), inputInUse_(false), hasPrevious_(false),
       hasRaw_(false), styleDirty_(false), selectedStyle_(0), intensity_(100), parameterIndex_(0),
       scene_(kPhotoSceneCamera), controlsVisible_(true), compare_(false), focusActive_(false),
       favoritesLo_(0), favoritesHi_(0), recentCount_(0), galleryIndex_(0), galleryLoadedIndex_(-1),
-      galleryHasThumbnail_(false), settingsDirty_(false), diagnostics_(false), touchStartX_(0),
+      galleryHasThumbnail_(false), settingsDirty_(false), diagnostics_(false),
+      controlsVisibleUntilMs_(monotonicMs() + 2000), photoMessageUntilMs_(0), touchStartX_(0),
       touchStartY_(0), touchStartMs_(0), jpegLength_(0), jpegTimestampMs_(0),
       lastDecodedTimestampMs_(0), firstProcessedTimestampMs_(0), lastProcessedTimestampMs_(0),
       photoStore_(storageRoot, cameraModel, versionName), storageReady_(false),
@@ -130,6 +132,14 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
     filterMetrics_.diagnostics = diagnostics_;
     filterMetrics_.favorite = isFavoriteLocked(selectedStyle_);
     filterMetrics_.photoStorageState = photoStore_.storageState();
+    if (!storageReady_) {
+        if (storageStatus == 3)
+            filterMetrics_.photoStorageState = kPhotoStorageDirectoryFailed;
+        else if (storageStatus == 4)
+            filterMetrics_.photoStorageState = kPhotoStorageWriteProbeFailed;
+        else if (storageStatus == 5)
+            filterMetrics_.photoStorageState = kPhotoStorageInsufficientSpace;
+    }
     filterMetrics_.photoWriteStage = photoStore_.writeStage();
     filterMetrics_.photoWriteError = photoStore_.lastError();
     int64_t freeBytes = photoStore_.freeBytes();
@@ -286,6 +296,8 @@ bool DisplayProbeWorker::key(int keyValue, bool down, int64_t timestampMs) {
         pthread_mutex_unlock(&mutex_);
         return true;
     }
+    controlsVisible_ = true;
+    controlsVisibleUntilMs_ = timestampMs + 2000;
     bool consumed = true;
     if (keyValue == kPhotoKeyPrevious || keyValue == kPhotoKeyNext) {
         int direction = keyValue == kPhotoKeyNext ? 1 : -1;
@@ -354,6 +366,7 @@ bool DisplayProbeWorker::key(int keyValue, bool down, int64_t timestampMs) {
         }
     } else if (keyValue == kPhotoKeyRecord) {
         photoStatus_ = kPhotoWriteVideoDisabled;
+        photoMessageUntilMs_ = timestampMs + 1200;
     } else if (keyValue == kPhotoKeyFocus) {
         focusActive_ = true;
     } else if (keyValue == 13) {
@@ -396,8 +409,11 @@ void DisplayProbeWorker::touch(int action, float x, float y, int64_t timestampMs
             styleDirty_ = hasRaw_;
             recordRecentLocked(selectedStyle_);
             settingsDirty_ = true;
+            controlsVisible_ = true;
+            controlsVisibleUntilMs_ = timestampMs + 2000;
         } else {
             controlsVisible_ = !controlsVisible_;
+            controlsVisibleUntilMs_ = controlsVisible_ ? timestampMs + 2000 : 0;
         }
     }
     filterMetrics_.compare = compare_;
@@ -410,8 +426,17 @@ void DisplayProbeWorker::touch(int action, float x, float y, int64_t timestampMs
 
 int DisplayProbeWorker::requestPhoto(int64_t timestampMs) {
     pthread_mutex_lock(&mutex_);
-    if (!storageReady_ || !hasPrevious_) {
+    if (!hasPrevious_) {
+        photoStatus_ = kPhotoWriteNoFrame;
+        photoMessageUntilMs_ = timestampMs + 1200;
+        filterMetrics_.photoStatus = photoStatus_;
+        pthread_cond_broadcast(&condition_);
+        pthread_mutex_unlock(&mutex_);
+        return kPhotoRequestUnavailable;
+    }
+    if (!storageReady_) {
         photoStatus_ = kPhotoWriteUnavailable;
+        photoMessageUntilMs_ = timestampMs + 1800;
         filterMetrics_.photoStatus = photoStatus_;
         pthread_cond_broadcast(&condition_);
         pthread_mutex_unlock(&mutex_);
@@ -421,6 +446,7 @@ int DisplayProbeWorker::requestPhoto(int64_t timestampMs) {
     if (!photoRunning_ || photoPending_ || photoInUse_) {
         pthread_mutex_unlock(&photoMutex_);
         photoStatus_ = kPhotoWriteBusy;
+        photoMessageUntilMs_ = timestampMs + 1200;
         filterMetrics_.photoStatus = photoStatus_;
         pthread_cond_broadcast(&condition_);
         pthread_mutex_unlock(&mutex_);
@@ -436,6 +462,7 @@ int DisplayProbeWorker::requestPhoto(int64_t timestampMs) {
     photoJob_ = kPhotoJobSave;
     photoPending_ = true;
     photoStatus_ = kPhotoWriteSaving;
+    photoMessageUntilMs_ = 0;
     filterMetrics_.photoStatus = photoStatus_;
     pthread_cond_broadcast(&photoCondition_);
     pthread_mutex_unlock(&photoMutex_);
@@ -588,9 +615,11 @@ void DisplayProbeWorker::photoRun() {
                 galleryHasThumbnail_ = true;
                 galleryPreset_ = presetIndex;
                 memcpy(galleryThumbnail_, photoFrame_, sizeof(galleryThumbnail_));
+                photoMessageUntilMs_ = monotonicMs() + 1200;
             } else {
                 photoStatus_ = kPhotoWriteFailed;
                 photoFailedCount_++;
+                photoMessageUntilMs_ = monotonicMs() + 1800;
             }
         } else if (job == kPhotoJobLoad) {
             galleryHasThumbnail_ = ok;
@@ -610,6 +639,7 @@ void DisplayProbeWorker::photoRun() {
             galleryLoadedIndex_ = -1;
             scene_ = kPhotoSceneGallery;
             photoStatus_ = ok ? kPhotoWriteDeleted : kPhotoWriteFailed;
+            photoMessageUntilMs_ = monotonicMs() + (ok ? 1200 : 1800);
             if (galleryPhotoCount_ > 0)
                 queueGalleryLoadLocked();
         }
@@ -840,6 +870,18 @@ void DisplayProbeWorker::run() {
 }
 
 void DisplayProbeWorker::renderNextLocked() {
+    int64_t nowMs = monotonicMs();
+    if (scene_ == kPhotoSceneCamera && controlsVisible_ && controlsVisibleUntilMs_ > 0 &&
+        nowMs >= controlsVisibleUntilMs_) {
+        controlsVisible_ = false;
+        filterMetrics_.controlsVisible = false;
+    }
+    if (photoStatus_ != kPhotoWriteSaving && photoStatus_ != kPhotoWriteLoading &&
+        photoMessageUntilMs_ > 0 && nowMs >= photoMessageUntilMs_) {
+        photoStatus_ = kPhotoWriteIdle;
+        photoMessageUntilMs_ = 0;
+        filterMetrics_.photoStatus = photoStatus_;
+    }
     if (frameCount_ == 0x7fffffff)
         frameCount_ = 0;
     else

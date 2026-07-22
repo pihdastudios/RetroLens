@@ -23,6 +23,7 @@ public final class NativeDisplayProbeController
 
   public interface Listener {
     void onDisplayProbeResult(int status);
+    void onProcessedPreviewReady();
   }
 
   private final SurfaceView surfaceView;
@@ -31,7 +32,8 @@ public final class NativeDisplayProbeController
   private final Handler handler = new Handler();
   private final int[] finalStats = new int[3];
   private final int[] runtimeStats = new int[12];
-  private final String storageRoot;
+  private String storageRoot = "";
+  private int storageStatus = StorageController.ROOT_UNAVAILABLE;
   private final Runnable animationTick = new Runnable() {
     @Override
     public void run() {
@@ -45,18 +47,24 @@ public final class NativeDisplayProbeController
   private boolean surfaceReady;
   private boolean tickScheduled;
   private boolean firstPostReported;
+  private boolean processedPreviewReported;
   private int reportedPhotoSaves;
   private int reportedPhotoFailures;
   private int reportedStorageState = -1;
 
-  public NativeDisplayProbeController(
-      SurfaceView view, Listener listener, StorageController.Result storage) {
+  public NativeDisplayProbeController(SurfaceView view, Listener listener) {
     this.surfaceView = view;
     this.listener = listener;
-    storageRoot = storage != null && storage.isReady() ? storage.root : "";
     holder = view.getHolder();
     holder.setFormat(PixelFormat.RGB_565);
     view.setZOrderMediaOverlay(true);
+  }
+
+  public synchronized void configureStorage(StorageController.Result storage) {
+    if (handle != 0L)
+      return;
+    storageRoot = storage != null && storage.isReady() ? storage.root : "";
+    storageStatus = storage == null ? StorageController.ROOT_UNAVAILABLE : storage.status;
   }
 
   public synchronized void start() {
@@ -64,6 +72,7 @@ public final class NativeDisplayProbeController
       return;
     active = true;
     firstPostReported = false;
+    processedPreviewReported = false;
     reportedPhotoSaves = 0;
     reportedPhotoFailures = 0;
     reportedStorageState = -1;
@@ -74,7 +83,7 @@ public final class NativeDisplayProbeController
       return;
     }
     handle = NativeBridge.nativeCreateDisplayProbe(
-        NativeBridge.BUILD_ID, FRAME_INTERVAL_MS, storageRoot, Build.MODEL, "1.0.0");
+        NativeBridge.BUILD_ID, FRAME_INTERVAL_MS, storageRoot, storageStatus, Build.MODEL, "1.0.0");
     if (handle == 0L) {
       fail(NativeBridge.SURFACE_NO_WINDOW);
       return;
@@ -188,6 +197,10 @@ public final class NativeDisplayProbeController
       listener.onDisplayProbeResult(status);
     }
     NativeBridge.nativeGetDisplayProbeStats(handle, runtimeStats);
+    if (!processedPreviewReported && runtimeStats[6] > 0) {
+      processedPreviewReported = true;
+      listener.onProcessedPreviewReady();
+    }
     if (runtimeStats[6] == 0 && runtimeStats[7] >= 3) {
       Logger.error("PhotoRuntime: analytical decode failed repeatedly; showing Sony fallback");
       fail(NativeBridge.SURFACE_FORMAT_UNSUPPORTED);

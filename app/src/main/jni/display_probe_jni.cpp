@@ -20,9 +20,9 @@ static const uint32_t kProbeCookie = 0x52545042U;
 
 struct DisplayProbe {
     DisplayProbe(const char* buildId, int intervalMs, const char* storageRoot,
-                 const char* cameraModel, const char* versionName)
-        : cookie(kProbeCookie), worker(buildId, intervalMs, storageRoot, cameraModel, versionName) {
-    }
+                 const char* cameraModel, const char* versionName, int storageStatus)
+        : cookie(kProbeCookie),
+          worker(buildId, intervalMs, storageRoot, cameraModel, versionName, storageStatus) {}
     uint32_t cookie;
     retrolens::DisplayProbeWorker worker;
 };
@@ -35,13 +35,14 @@ static DisplayProbe* from(jlong handle) {
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL Java_io_pihda_retrolens_NativeBridge_nativeCreateDisplayProbe(
-    JNIEnv* env, jclass, jstring buildId, jint intervalMs, jstring storageRoot, jstring cameraModel,
-    jstring versionName) {
+    JNIEnv* env, jclass, jstring buildId, jint intervalMs, jstring storageRoot, jint storageStatus,
+    jstring cameraModel, jstring versionName) {
     const char* build = buildId ? env->GetStringUTFChars(buildId, 0) : 0;
     const char* storage = storageRoot ? env->GetStringUTFChars(storageRoot, 0) : 0;
     const char* model = cameraModel ? env->GetStringUTFChars(cameraModel, 0) : 0;
     const char* version = versionName ? env->GetStringUTFChars(versionName, 0) : 0;
-    DisplayProbe* probe = new DisplayProbe(build, intervalMs, storage, model, version);
+    DisplayProbe* probe =
+        new DisplayProbe(build, intervalMs, storage, model, version, storageStatus);
     if (build)
         env->ReleaseStringUTFChars(buildId, build);
     if (storage)
