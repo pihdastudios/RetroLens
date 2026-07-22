@@ -117,7 +117,8 @@ SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames
 
 bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* buildId,
                         int surfaceWidth, int surfaceHeight, int surfaceFormat, int frameNumber,
-                        const SequenceProbeMetrics& sequence, const Pixel* filtered,
+                        const SequenceProbeMetrics& sequence, const Pixel* original,
+                        const Pixel* filtered, const Pixel* galleryThumbnail,
                         const FilterProbeMetrics& filter) {
     if (!pixels || width <= 0 || height <= 0)
         return false;
@@ -134,27 +135,132 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
             int sourceY = y * kFrameHeight / height;
             for (int x = 0; x < width; x++) {
                 int sourceX = x * kFrameWidth / width;
-                const Pixel& source = filtered[sourceY * kFrameWidth + sourceX];
+                bool showOriginal = original && filter.compare && x < width / 2;
+                const Pixel& source = showOriginal ? original[sourceY * kFrameWidth + sourceX]
+                                                   : filtered[sourceY * kFrameWidth + sourceX];
                 pixels[y * width + x] = probeRgb565(source.r, source.g, source.b);
             }
         }
-        char top[64];
-        snprintf(top, sizeof(top), "%s P%d.%d D%d F%d", presetAt(filter.selectedPreset).name,
-                 filter.processedFpsTenths / 10, filter.processedFpsTenths % 10, filter.decodeMs,
-                 filter.filterMs);
-        shadowedText(pixels, width, height, 4, 4, top, accent, background);
-        char bottom[64];
-        snprintf(bottom, sizeof(bottom), "R%d/%d O%d X%d J%dK", sequence.receivedFrames,
-                 sequence.releasedFrames, outstanding, filter.droppedFrames,
-                 (sequence.lastJpegBytes + 1023) / 1024);
-        shadowedText(pixels, width, height, 4, height - 11, bottom,
-                     imbalance || filter.decodeError ? probeRgb565(255, 150, 110) : warm,
-                     background);
+        const int safeWidth = 120;
+        const int safeHeight = 90;
+        const Preset& selected = presetAt(filter.selectedPreset);
+        char label[20];
+        strncpy(label, selected.name, sizeof(label) - 1);
+        label[sizeof(label) - 1] = 0;
+        if (filter.scene == kPhotoSceneGallery || filter.scene == kPhotoSceneDeleteConfirm) {
+            rectangle(pixels, width, height, 0, 0, safeWidth, safeHeight, background);
+            shadowedText(pixels, width, height, 3, 3, "PHOTO GALLERY", accent, background);
+            if (filter.galleryPhotoCount <= 0) {
+                text(pixels, width, height, 3, 30, "NO RETRO PHOTOS", warm);
+            } else if (galleryThumbnail && filter.galleryHasThumbnail) {
+                for (int y = 14; y < 68; y++) {
+                    int sourceY = (y - 14) * kFrameHeight / 54;
+                    for (int x = 3; x < 75; x++) {
+                        int sourceX = (x - 3) * kFrameWidth / 72;
+                        const Pixel& source = galleryThumbnail[sourceY * kFrameWidth + sourceX];
+                        pixels[y * width + x] = probeRgb565(source.r, source.g, source.b);
+                    }
+                }
+                char count[24];
+                snprintf(count, sizeof(count), "%d/%d", filter.galleryIndex + 1,
+                         filter.galleryPhotoCount);
+                text(pixels, width, height, 80, 18, count, warm);
+                text(pixels, width, height, 80, 34, presetAt(filter.galleryPreset).category,
+                     accent);
+                text(pixels, width, height, 80, 50, "PRESET FAV", warm);
+            } else {
+                text(pixels, width, height, 3, 30, "LOADING", accent);
+            }
+            text(pixels, width, height, 3, 76,
+                 filter.scene == kPhotoSceneDeleteConfirm ? "CENTER DELETE  BACK CANCEL"
+                                                          : "LEFT RIGHT  BACK DELETE",
+                 filter.scene == kPhotoSceneDeleteConfirm ? probeRgb565(255, 150, 110) : warm);
+        } else if (filter.scene == kPhotoSceneControls) {
+            rectangle(pixels, width, height, 0, 0, safeWidth, safeHeight, background);
+            text(pixels, width, height, 3, 3, "QUICK CONTROL", accent);
+            text(pixels, width, height, 3, 17, label, warm);
+            static const char* kParameters[] = {"INTENSITY", "CONTRAST", "GRAIN", "MOTION"};
+            char parameter[24];
+            snprintf(parameter, sizeof(parameter), "%s %d", kParameters[filter.parameterIndex],
+                     filter.parameterValue);
+            text(pixels, width, height, 3, 34, parameter, warm);
+            rectangle(pixels, width, height, 3, 47, 107, 54, probeRgb565(48, 55, 57));
+            int bar =
+                filter.parameterIndex == 0 ? filter.parameterValue : 50 + filter.parameterValue;
+            if (bar < 0)
+                bar = 0;
+            if (bar > 100)
+                bar = 100;
+            rectangle(pixels, width, height, 3, 47, 3 + bar, 54, accent);
+            text(pixels, width, height, 3, 62, "UP DOWN SELECT", warm);
+            text(pixels, width, height, 3, 77, "CENTER CLOSE", accent);
+        } else if (filter.scene == kPhotoSceneBrowser) {
+            rectangle(pixels, width, height, 0, 0, safeWidth, safeHeight, background);
+            text(pixels, width, height, 3, 3, "STYLE BROWSER", accent);
+            for (int row = -2; row <= 2; row++) {
+                int index = (filter.selectedPreset + row + presetCount()) % presetCount();
+                char name[18];
+                strncpy(name, presetAt(index).name, sizeof(name) - 1);
+                name[sizeof(name) - 1] = 0;
+                text(pixels, width, height, 3, 18 + (row + 2) * 14, name, row == 0 ? accent : warm);
+            }
+        } else if (filter.scene == kPhotoSceneDiagnostics) {
+            rectangle(pixels, width, height, 0, 0, safeWidth, safeHeight, background);
+            text(pixels, width, height, 3, 3, "DIAGNOSTICS", accent);
+            char line[32];
+            snprintf(line, sizeof(line), "FPS %d.%d D%d F%d", filter.processedFpsTenths / 10,
+                     filter.processedFpsTenths % 10, filter.decodeMs, filter.filterMs);
+            text(pixels, width, height, 3, 18, line, warm);
+            snprintf(line, sizeof(line), "RX %d REL %d OUT %d", sequence.receivedFrames,
+                     sequence.releasedFrames, outstanding);
+            text(pixels, width, height, 3, 33, line, warm);
+            snprintf(line, sizeof(line), "DROP %d JPEG %dK", filter.droppedFrames,
+                     (sequence.lastJpegBytes + 1023) / 1024);
+            text(pixels, width, height, 3, 48, line, warm);
+            snprintf(line, sizeof(line), "SAVE %d FAIL %d", filter.photoSavedCount,
+                     filter.photoFailedCount);
+            text(pixels, width, height, 3, 63, line, warm);
+            text(pixels, width, height, 3, 78, "FN CLOSE", accent);
+        } else if (filter.controlsVisible) {
+            rectangle(pixels, width, height, 0, 0, safeWidth, 12, background);
+            text(pixels, width, height, 2, 2, label, accent);
+            if (filter.favorite)
+                text(pixels, width, height, 106, 2, "F", warm);
+            rectangle(pixels, width, height, 0, 62, safeWidth, safeHeight, background);
+            text(pixels, width, height, 2, 65, selected.category, warm);
+            text(pixels, width, height, 2, 78, "< STYLE >  CENTER", accent);
+            if (filter.focusActive)
+                text(pixels, width, height, 82, 17, "FOCUS", accent);
+        }
+        if (filter.compare) {
+            text(pixels, width, height, 2, 14, "ORIGINAL", warm);
+            text(pixels, width, height, 64, 14, "RETRO", accent);
+        }
+        const char* photoMessage = 0;
+        if (filter.photoStatus == 1)
+            photoMessage = "SAVING PHOTO";
+        else if (filter.photoStatus == 2)
+            photoMessage = "RETRO PHOTO SAVED";
+        else if (filter.photoStatus == 3)
+            photoMessage = "PHOTO SAVE FAILED";
+        else if (filter.photoStatus == 4)
+            photoMessage = "PHOTO WRITER BUSY";
+        else if (filter.photoStatus == 6)
+            photoMessage = "PHOTO DELETED";
+        else if (filter.photoStatus == 7)
+            photoMessage = "PHOTO ONLY - VIDEO OFF";
+        else if (filter.photoStatus == 8)
+            photoMessage = "RETRO PHOTO UNAVAILABLE";
+        if (photoMessage) {
+            rectangle(pixels, width, height, 0, 39, safeWidth, 53, background);
+            text(pixels, width, height, 3, 42, photoMessage,
+                 filter.photoStatus == 3 || filter.photoStatus == 8 ? probeRgb565(255, 150, 110)
+                                                                    : accent);
+        }
         if (imbalance || filter.decodeError) {
-            int errorTop = height / 2 - 14;
-            rectangle(pixels, width, height, 24, errorTop, width - 24, errorTop + 28, background);
-            text(pixels, width, height, 36, errorTop + 10,
-                 imbalance ? "BUFFER IMBALANCE" : "DECODE ERROR", probeRgb565(255, 150, 110));
+            rectangle(pixels, width, height, 0, 27, safeWidth, 58, background);
+            text(pixels, width, height, 3, 38, imbalance ? "BUFFER IMBALANCE" : "DECODE ERROR",
+                 probeRgb565(255, 150, 110));
         }
         return true;
     }
@@ -163,15 +269,15 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
                              probeRgb565(229, 91, 112),  probeRgb565(244, 193, 74),
                              probeRgb565(89, 132, 212),  probeRgb565(171, 112, 205)};
     int barLeft = 9;
-    int barRight = width - 9;
+    int barRight = width > 120 ? 111 : width - 9;
     int barWidth = barRight > barLeft ? (barRight - barLeft) / 6 : 0;
     for (int index = 0; index < 6; index++)
         rectangle(pixels, width, height, barLeft + index * barWidth, 7,
                   index == 5 ? barRight : barLeft + (index + 1) * barWidth, 25, bars[index]);
 
     char threadStatus[64];
-    snprintf(threadStatus, sizeof(threadStatus), "NATIVE THREAD 8 FPS F%d", frameNumber);
-    text(pixels, width, height, 10, 38, threadStatus, accent);
+    snprintf(threadStatus, sizeof(threadStatus), "PHOTO ENGINE F%d", frameNumber);
+    text(pixels, width, height, 4, 30, threadStatus, accent);
     const char* state = "SEQUENCE OFF";
     if (sequence.state == kSequenceStarting)
         state = "SEQUENCE STARTING";
@@ -183,14 +289,14 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
         state = "SEQUENCE STOPPING";
     if (filter.decodeError)
         state = "DECODE ERROR";
-    text(pixels, width, height, 10, 62, imbalance ? "BUFFER IMBALANCE" : state,
+    text(pixels, width, height, 4, 45, imbalance ? "BUFFER IMBALANCE" : state,
          imbalance || sequence.state == kSequenceError || filter.decodeError
              ? probeRgb565(255, 150, 110)
              : warm);
     char balance[64];
     snprintf(balance, sizeof(balance), "RX %d REL %d OUT %d", sequence.receivedFrames,
              sequence.releasedFrames, outstanding);
-    text(pixels, width, height, 10, 86, balance, warm);
+    text(pixels, width, height, 4, 60, balance, warm);
     char analytical[64];
     if (filter.decodeError)
         snprintf(analytical, sizeof(analytical), "DECODE FAIL %d JPEG %dK", filter.decodeFailures,
@@ -198,20 +304,21 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
     else
         snprintf(analytical, sizeof(analytical), "FPS %d.%d JPEG %dK", sequence.fpsTenths / 10,
                  sequence.fpsTenths % 10, (sequence.lastJpegBytes + 1023) / 1024);
-    text(pixels, width, height, 10, 110, analytical, accent);
-    text(pixels, width, height, 10, 134, buildId ? buildId : "UNKNOWN BUILD", warm);
-    int sweepWidth = width > 20 ? width - 20 : 1;
-    int sweep = 10 + (int)(((unsigned int)frameNumber * 7U) % (unsigned int)sweepWidth);
-    rectangle(pixels, width, height, sweep, height - 20, sweep + 2, height - 4, warm);
+    text(pixels, width, height, 4, 75, analytical, accent);
+    int sweepWidth = width > 120 ? 116 : width - 4;
+    int sweep = 2 + (int)(((unsigned int)frameNumber * 7U) % (unsigned int)sweepWidth);
+    rectangle(pixels, width, height, sweep, 86, sweep + 2, 90, warm);
 
     (void)surfaceWidth;
     (void)surfaceHeight;
     (void)surfaceFormat;
+    (void)buildId;
 
     rectangle(pixels, width, height, 0, 0, width, 2, accent);
-    rectangle(pixels, width, height, 0, height - 2, width, height, accent);
-    rectangle(pixels, width, height, 0, 0, 2, height, accent);
-    rectangle(pixels, width, height, width - 2, 0, width, height, accent);
+    rectangle(pixels, width, height, 0, 88, width > 120 ? 120 : width, 90, accent);
+    rectangle(pixels, width, height, 0, 0, 2, height > 90 ? 90 : height, accent);
+    rectangle(pixels, width, height, width > 120 ? 118 : width - 2, 0, width > 120 ? 120 : width,
+              height > 90 ? 90 : height, accent);
     return true;
 }
 

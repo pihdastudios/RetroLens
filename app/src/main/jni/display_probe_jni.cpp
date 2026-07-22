@@ -19,8 +19,10 @@ enum SurfaceStatus {
 static const uint32_t kProbeCookie = 0x52545042U;
 
 struct DisplayProbe {
-    DisplayProbe(const char* buildId, int intervalMs)
-        : cookie(kProbeCookie), worker(buildId, intervalMs) {}
+    DisplayProbe(const char* buildId, int intervalMs, const char* storageRoot,
+                 const char* cameraModel, const char* versionName)
+        : cookie(kProbeCookie), worker(buildId, intervalMs, storageRoot, cameraModel, versionName) {
+    }
     uint32_t cookie;
     retrolens::DisplayProbeWorker worker;
 };
@@ -33,11 +35,21 @@ static DisplayProbe* from(jlong handle) {
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL Java_io_pihda_retrolens_NativeBridge_nativeCreateDisplayProbe(
-    JNIEnv* env, jclass, jstring buildId, jint intervalMs) {
+    JNIEnv* env, jclass, jstring buildId, jint intervalMs, jstring storageRoot, jstring cameraModel,
+    jstring versionName) {
     const char* build = buildId ? env->GetStringUTFChars(buildId, 0) : 0;
-    DisplayProbe* probe = new DisplayProbe(build, intervalMs);
+    const char* storage = storageRoot ? env->GetStringUTFChars(storageRoot, 0) : 0;
+    const char* model = cameraModel ? env->GetStringUTFChars(cameraModel, 0) : 0;
+    const char* version = versionName ? env->GetStringUTFChars(versionName, 0) : 0;
+    DisplayProbe* probe = new DisplayProbe(build, intervalMs, storage, model, version);
     if (build)
         env->ReleaseStringUTFChars(buildId, build);
+    if (storage)
+        env->ReleaseStringUTFChars(storageRoot, storage);
+    if (model)
+        env->ReleaseStringUTFChars(cameraModel, model);
+    if (version)
+        env->ReleaseStringUTFChars(versionName, version);
     if (!probe->worker.start()) {
         delete probe;
         return 0;
@@ -74,11 +86,12 @@ extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativePos
             status = SURFACE_FORMAT_UNSUPPORTED;
     }
     int postResult = ANativeWindow_unlockAndPost(window);
-    __android_log_print(ANDROID_LOG_INFO, "RetroLens",
-                        "DisplayProbe: status=%d geometry=%d surface=%dx%d stride=%d format=%d "
-                        "frame=%d",
-                        status, geometryResult, buffer.width, buffer.height, buffer.stride,
-                        buffer.format, frameNumber);
+    if (status != SURFACE_OK || frameNumber % 80 == 0)
+        __android_log_print(ANDROID_LOG_INFO, "RetroLens",
+                            "PhotoRuntime: status=%d geometry=%d surface=%dx%d stride=%d "
+                            "format=%d frame=%d",
+                            status, geometryResult, buffer.width, buffer.height, buffer.stride,
+                            buffer.format, frameNumber);
     ANativeWindow_release(window);
     if (postResult != 0 && status == SURFACE_OK)
         status = SURFACE_POST_FAILED;
@@ -113,6 +126,46 @@ Java_io_pihda_retrolens_NativeBridge_nativeChangeDisplayProbeStyle(JNIEnv*, jcla
                                                                    jint delta) {
     DisplayProbe* probe = from(handle);
     return probe ? probe->worker.changeStyle(delta) : -1;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_io_pihda_retrolens_NativeBridge_nativeDisplayProbeKey(
+    JNIEnv*, jclass, jlong handle, jint key, jboolean down, jlong timestampMs) {
+    DisplayProbe* probe = from(handle);
+    return probe && probe->worker.key(key, down == JNI_TRUE, timestampMs) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeDisplayProbeTouch(
+    JNIEnv*, jclass, jlong handle, jint action, jfloat x, jfloat y, jlong timestampMs) {
+    DisplayProbe* probe = from(handle);
+    if (probe)
+        probe->worker.touch(action, x, y, timestampMs);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_pihda_retrolens_NativeBridge_nativeRequestDisplayProbePhoto(JNIEnv*, jclass, jlong handle,
+                                                                    jlong timestampMs) {
+    DisplayProbe* probe = from(handle);
+    return probe ? probe->worker.requestPhoto(timestampMs) : retrolens::kPhotoRequestUnavailable;
+}
+
+extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeSetDisplayProbeFocus(
+    JNIEnv*, jclass, jlong handle, jboolean active) {
+    DisplayProbe* probe = from(handle);
+    if (probe)
+        probe->worker.setFocus(active == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_io_pihda_retrolens_NativeBridge_nativeGetDisplayProbeStats(
+    JNIEnv* env, jclass, jlong handle, jintArray output) {
+    DisplayProbe* probe = from(handle);
+    if (!probe || !output || env->GetArrayLength(output) < 8)
+        return;
+    retrolens::FilterProbeMetrics metrics;
+    probe->worker.getFilterStats(&metrics);
+    jint values[8] = {metrics.selectedPreset,    metrics.photoSavedCount, metrics.photoFailedCount,
+                      metrics.photoEncodedBytes, metrics.photoStatus,     metrics.galleryPhotoCount,
+                      metrics.processedFrames,   metrics.droppedFrames};
+    env->SetIntArrayRegion(output, 0, 8, values);
 }
 
 extern "C" JNIEXPORT void JNICALL

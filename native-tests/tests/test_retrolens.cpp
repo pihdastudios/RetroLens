@@ -1,6 +1,7 @@
 #include "display_probe.h"
 #include "display_probe_worker.h"
 #include "jpeg_encoder.h"
+#include "photo_store.h"
 #include "reduced_jpeg_decoder.h"
 #include "retrolens_core.h"
 #include "third_party/picojpeg/picojpeg.h"
@@ -9,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 using namespace retrolens;
 
@@ -149,7 +152,8 @@ static void testDisplayProbeRaster() {
     uint16_t guarded[2 + 13 * 9 + 2];
     for (int index = 0; index < (int)(sizeof(guarded) / sizeof(guarded[0])); index++)
         guarded[index] = 0x55aa;
-    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4, 7, starting, 0, filter));
+    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4, 7, starting, 0, 0, 0,
+                              filter));
     assert(guarded[0] == 0x55aa && guarded[1] == 0x55aa);
     assert(guarded[2 + 13 * 9] == 0x55aa && guarded[2 + 13 * 9 + 1] == 0x55aa);
     assert(checksum16(guarded + 2, 13 * 9) != 0);
@@ -157,17 +161,17 @@ static void testDisplayProbeRaster() {
     uint16_t first[kDisplayProbeWidth * kDisplayProbeHeight];
     uint16_t second[kDisplayProbeWidth * kDisplayProbeHeight];
     assert(renderDisplayProbe(first, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              240, 180, 4, 11, starting, 0, filter));
+                              240, 180, 4, 11, starting, 0, 0, 0, filter));
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              240, 180, 4, 11, starting, 0, filter));
+                              240, 180, 4, 11, starting, 0, 0, 0, filter));
     assert(!memcmp(first, second, sizeof(first)));
     assert(checksum16(first, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
     assert(first[0] == probeRgb565(66, 232, 188));
-    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4, 0, starting, 0, filter));
-    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4, 0, starting, 0, filter));
+    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4, 0, starting, 0, 0, 0, filter));
+    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4, 0, starting, 0, 0, 0, filter));
 
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              240, 180, 4, 12, starting, 0, filter));
+                              240, 180, 4, 12, starting, 0, 0, 0, filter));
     assert(memcmp(first, second, sizeof(first)) != 0);
 
     SequenceProbeMetrics active =
@@ -176,7 +180,7 @@ static void testDisplayProbeRaster() {
     assert(active.receivedFrames == 10 && active.releasedFrames == 9);
     assert(active.lastJpegBytes == 65536 && active.fpsTenths == 90);
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "sequence-probe",
-                              240, 180, 4, 11, active, 0, filter));
+                              240, 180, 4, 11, active, 0, 0, 0, filter));
     assert(memcmp(first, second, sizeof(first)) != 0);
 
     SequenceProbeMetrics malformed = calculateSequenceProbeMetrics(99, -1, -2, 999999, 2000, 1000);
@@ -197,7 +201,7 @@ static void testDisplayProbeRaster() {
     filter.filterMs = 1;
     filter.selectedPreset = findPreset("olive_pocket");
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "filter-probe", 240,
-                              180, 4, 11, active, filtered, filter));
+                              180, 4, 11, active, filtered, filtered, 0, filter));
     assert(checksum16(second, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
 
     const int sourceX = 40;
@@ -219,7 +223,7 @@ static void testDisplayProbeRaster() {
 
 static void testDisplayProbeWorkerLifecycle() {
     for (int cycle = 0; cycle < 20; cycle++) {
-        DisplayProbeWorker worker("host-thread-probe", 2);
+        DisplayProbeWorker worker("host-thread-probe", 2, "/proc/retrolens-host", "HOST", "test");
         assert(worker.start());
         assert(worker.start());
         assert(worker.waitForFrame(3, 250));
@@ -283,7 +287,7 @@ static void testReducedDecodeAndBoundedWorker() {
     assert(encodeJpeg(small, 64, 48, 82, wrongSize, sizeof(wrongSize), &wrongSizeLength));
     assert(!decodeReducedJpeg(wrongSize, wrongSizeLength, decoded));
 
-    DisplayProbeWorker worker("host-filter-probe", 8);
+    DisplayProbeWorker worker("host-filter-probe", 8, "/proc/retrolens-host", "HOST", "test");
     assert(worker.start());
     int submitted = 0;
     int dropped = 0;
@@ -305,19 +309,47 @@ static void testReducedDecodeAndBoundedWorker() {
     assert(metrics.droppedFrames == dropped);
     assert(metrics.processedFrames >= 1 && metrics.processedFrames <= metrics.acceptedFrames);
     assert(metrics.decodeFailures == 0);
-    const char* expectedStyles[kFilterProbeStyleCount] = {
-        "olive_pocket",     "cga_shock",           "one_bit_desktop", "consumer_crt",
-        "vhs_rental",       "soviet_archive_1978", "newsprint",       "comic_ink",
-        "piss_filter_2007", "thermal_false_color"};
-    assert(metrics.selectedPreset == findPreset(expectedStyles[0]));
+    assert(kFilterProbeStyleCount == presetCount());
+    assert(metrics.selectedPreset == 0);
     for (int index = 1; index < kFilterProbeStyleCount; index++)
-        assert(worker.changeStyle(1) == findPreset(expectedStyles[index]));
-    assert(worker.changeStyle(1) == findPreset(expectedStyles[0]));
-    assert(worker.changeStyle(-1) == findPreset(expectedStyles[kFilterProbeStyleCount - 1]));
+        assert(worker.changeStyle(1) == index);
+    assert(worker.changeStyle(1) == 0);
+    assert(worker.changeStyle(-1) == presetCount() - 1);
     worker.getFilterStats(&metrics);
     assert(metrics.styleChanges == kFilterProbeStyleCount + 1);
     assert(worker.stop() <= 250);
     assert(worker.submitJpeg(encoded, (int)size, 5000) == kFilterSubmitInvalid);
+
+    char photoRoot[128];
+    snprintf(photoRoot, sizeof(photoRoot), "/tmp/retrolens-worker-photo-%d", (int)getpid());
+    mkdir(photoRoot, 0775);
+    DisplayProbeWorker* photoWorker =
+        new DisplayProbeWorker("host-photo-runtime", 8, photoRoot, "HOST", "test");
+    assert(photoWorker->start());
+    assert(photoWorker->submitJpeg(encoded, (int)size, 6000) == kFilterSubmitAccepted);
+    assert(photoWorker->waitForProcessedFrame(1, 1000));
+    assert(photoWorker->requestPhoto(6123) == kPhotoRequestQueued);
+    assert(photoWorker->waitForPhotoResult(1, 3000));
+    photoWorker->getFilterStats(&metrics);
+    assert(metrics.photoSavedCount == 1 && metrics.photoFailedCount == 0);
+    assert(metrics.photoEncodedBytes > 1000 && metrics.galleryPhotoCount == 1);
+    assert(photoWorker->stop() <= 3000);
+    delete photoWorker;
+    PhotoStore photoStore(photoRoot, "HOST", "test");
+    assert(photoStore.initialize() && photoStore.photoCount() == 1);
+    assert(photoStore.deletePhoto(0));
+    char cleanup[800];
+    snprintf(cleanup, sizeof(cleanup), "%s/RETROLENS/THUMBNAILS/index.txt", photoRoot);
+    unlink(cleanup);
+    snprintf(cleanup, sizeof(cleanup), "%s/RETROLENS/THUMBNAILS", photoRoot);
+    rmdir(cleanup);
+    snprintf(cleanup, sizeof(cleanup), "%s/RETROLENS/PHOTOS", photoRoot);
+    rmdir(cleanup);
+    snprintf(cleanup, sizeof(cleanup), "%s/RETROLENS/CONFIG", photoRoot);
+    rmdir(cleanup);
+    snprintf(cleanup, sizeof(cleanup), "%s/RETROLENS", photoRoot);
+    rmdir(cleanup);
+    rmdir(photoRoot);
     delete[] encoded;
 }
 
@@ -395,6 +427,123 @@ static void testMalformedJpegRejection() {
     assert(status != 0);
 }
 
+static bool jpegDimensions(const char* path, int* width, int* height) {
+    FILE* file = fopen(path, "rb");
+    if (!file)
+        return false;
+    int first = fgetc(file);
+    int second = fgetc(file);
+    if (first != 0xff || second != 0xd8) {
+        fclose(file);
+        return false;
+    }
+    while (!feof(file)) {
+        int markerStart = fgetc(file);
+        if (markerStart != 0xff)
+            continue;
+        int marker = fgetc(file);
+        while (marker == 0xff)
+            marker = fgetc(file);
+        if (marker == 0xd9 || marker == 0xda)
+            break;
+        int high = fgetc(file);
+        int low = fgetc(file);
+        int length = high * 256 + low;
+        if (length < 2)
+            break;
+        if (marker >= 0xc0 && marker <= 0xc3) {
+            fgetc(file);
+            int heightHigh = fgetc(file);
+            int heightLow = fgetc(file);
+            int widthHigh = fgetc(file);
+            int widthLow = fgetc(file);
+            *height = heightHigh * 256 + heightLow;
+            *width = widthHigh * 256 + widthLow;
+            fclose(file);
+            return true;
+        }
+        fseek(file, length - 2, SEEK_CUR);
+    }
+    fclose(file);
+    return false;
+}
+
+static void testPhotoStoreAndSettings() {
+    char root[128];
+    snprintf(root, sizeof(root), "/tmp/retrolens-photo-test-%d", (int)getpid());
+    mkdir(root, 0775);
+    PhotoStore store(root, "HOST CAMERA", "test-version");
+    assert(store.initialize());
+
+    RuntimeSettings settings;
+    memset(&settings, 0, sizeof(settings));
+    settings.selectedPreset = findPreset("piss_filter_2007");
+    settings.intensity = 75;
+    settings.favoritesLo = 5;
+    settings.favoritesHi = 2;
+    settings.recentCount = 2;
+    settings.recent[0] = findPreset("olive_pocket");
+    settings.recent[1] = findPreset("newsprint");
+    settings.adjustments[settings.selectedPreset][0] = 15;
+    settings.adjustments[settings.selectedPreset][1] = -4;
+    settings.adjustments[settings.selectedPreset][2] = 10;
+    settings.motion = 1;
+    settings.diagnostics = true;
+    assert(store.saveSettings(settings));
+    RuntimeSettings restored;
+    memset(&restored, 0, sizeof(restored));
+    assert(store.loadSettings(&restored));
+    assert(restored.selectedPreset == settings.selectedPreset);
+    assert(restored.intensity == 75 && restored.favoritesLo == 5 && restored.favoritesHi == 2);
+    assert(restored.recentCount == 2 && restored.recent[1] == settings.recent[1]);
+    assert(restored.adjustments[settings.selectedPreset][0] == 15);
+    assert(restored.adjustments[settings.selectedPreset][1] == -4);
+    assert(restored.adjustments[settings.selectedPreset][2] == 10);
+    assert(restored.motion == 1 && restored.diagnostics);
+
+    Pixel frame[kFrameWidth * kFrameHeight];
+    fill(frame, kFrameWidth, kFrameHeight);
+    Pixel* scaled = new Pixel[kPhotoWidth * kPhotoHeight];
+    unsigned char* encoded = new unsigned char[512 * 1024];
+    int encodedBytes = 0;
+    assert(store.savePhoto(frame, settings.selectedPreset, settings.intensity,
+                           settings.adjustments[settings.selectedPreset], true, 123456789, scaled,
+                           encoded, 512 * 1024, &encodedBytes));
+    assert(encodedBytes > 1000 && store.photoCount() == 1);
+    PhotoEntry entry;
+    assert(store.getPhoto(0, &entry));
+    assert(entry.presetIndex == settings.selectedPreset && entry.favorite);
+    char photoPath[800];
+    snprintf(photoPath, sizeof(photoPath), "%s/PHOTOS/%s", store.basePath(), entry.filename);
+    int width = 0, height = 0;
+    assert(jpegDimensions(photoPath, &width, &height));
+    assert(width == kPhotoWidth && height == kPhotoHeight);
+    Pixel thumbnail[kFrameWidth * kFrameHeight];
+    assert(store.loadThumbnail(0, thumbnail));
+    assert(!memcmp(frame, thumbnail, sizeof(frame)));
+
+    PhotoStore reloaded(root, "HOST CAMERA", "test-version");
+    assert(reloaded.initialize() && reloaded.photoCount() == 1);
+    assert(reloaded.deletePhoto(0) && reloaded.photoCount() == 0);
+    delete[] encoded;
+    delete[] scaled;
+
+    char path[800];
+    snprintf(path, sizeof(path), "%s/RETROLENS/CONFIG/settings.cfg", root);
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/RETROLENS/THUMBNAILS/index.txt", root);
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/RETROLENS/THUMBNAILS", root);
+    rmdir(path);
+    snprintf(path, sizeof(path), "%s/RETROLENS/PHOTOS", root);
+    rmdir(path);
+    snprintf(path, sizeof(path), "%s/RETROLENS/CONFIG", root);
+    rmdir(path);
+    snprintf(path, sizeof(path), "%s/RETROLENS", root);
+    rmdir(path);
+    rmdir(root);
+}
+
 int main() {
     testCatalog();
     testAllPresetsAndTinyImages();
@@ -408,6 +557,7 @@ int main() {
     testJpegAndAvi();
     testAviBoundsAndAbort();
     testMalformedJpegRejection();
+    testPhotoStoreAndSettings();
     printf("RetroLens native tests passed: presets=%d\n", presetCount());
     return 0;
 }

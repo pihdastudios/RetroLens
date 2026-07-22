@@ -31,9 +31,11 @@ grep -q 'static const int kFrameWidth = 80' "$PROJECT_DIR/app/src/main/jni/retro
 grep -q 'static const bool kRetroClipEnabled = false' "$PROJECT_DIR/app/src/main/jni/retrolens_core.h"
 grep -q 'static const bool kProcessedDerivativeEnabled = false' \
     "$PROJECT_DIR/app/src/main/jni/retrolens_core.h"
+grep -q 'static const bool kPhotoRuntimeEnabled = true' \
+    "$PROJECT_DIR/app/src/main/jni/retrolens_core.h"
 grep -q 'RETRO_CLIP_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
-grep -q 'PROCESSED_DERIVATIVE_ENABLED = false' \
+grep -q 'PROCESSED_DERIVATIVE_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'SAFE_BASELINE_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
@@ -47,7 +49,7 @@ grep -q 'FILTER_PANEL_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'NATIVE_OUTPUT_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
-grep -q 'EXTERNAL_LOGGING_ENABLED = false' \
+grep -q 'EXTERNAL_LOGGING_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
 grep -q 'nativeProbeSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
 grep -q 'android:layout_width="240dp"' \
@@ -56,8 +58,12 @@ grep -q 'android:layout_height="180dp"' \
     "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
 grep -q 'kDisplayProbeWidth = 240' "$PROJECT_DIR/app/src/main/jni/display_probe.h"
 grep -q 'kDisplayProbeHeight = 180' "$PROJECT_DIR/app/src/main/jni/display_probe.h"
-grep -q 'reduced_jpeg_decoder.cpp display_probe.cpp display_probe_worker.cpp display_probe_jni.cpp' \
+grep -q 'retrolens_core.cpp reduced_jpeg_decoder.cpp display_probe.cpp display_probe_worker.cpp display_probe_jni.cpp photo_store.cpp' \
     "$PROJECT_DIR/app/src/main/jni/Android.mk"
+if grep -q 'retrolens_runtime.cpp' "$PROJECT_DIR/app/src/main/jni/Android.mk"; then
+    echo "Photo-only APK must not link the retired video runtime" >&2
+    exit 1
+fi
 if grep -q 'retroLensSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"; then
     echo "Display probe must not restore the full native output surface" >&2
     exit 1
@@ -91,11 +97,11 @@ grep -q 'nativeSubmitDisplayProbeJpeg' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'nativeChangeDisplayProbeStyle' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'nativeRequestDisplayProbePhoto' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'displayProbeController.submitJpeg' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
-grep -q 'displayProbeController.changeStyle(-1)' \
-    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
-grep -q 'displayProbeController.changeStyle(1)' \
+grep -q 'displayProbeController.requestPhoto()' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
 if grep -q 'NativeBridge.load' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
@@ -107,9 +113,9 @@ if grep -q 'nativeCreate(' \
     echo "Display probe must not create the full native runtime" >&2
     exit 1
 fi
-if grep -Eq 'CameraSequence|Environment|getExternalStorageDirectory|new Thread' \
+if grep -Eq 'CameraSequence|new Thread' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"; then
-    echo "Thread probe must not add a Java worker or storage access" >&2
+    echo "Photo runtime controller must not add a Java worker or Sony polling" >&2
     exit 1
 fi
 grep -q 'FRAME_INTERVAL_MS = 125' \
@@ -131,19 +137,19 @@ if grep -Eq 'malloc|new |fopen|mkdir|encodeJpeg|AviWriter' \
     echo "Filter panel worker must use fixed buffers and contain no storage or recorder path" >&2
     exit 1
 fi
-grep -q 'kFilterProbeStyleCount = 10' \
+grep -q 'kFilterProbeStyleCount = kMaxPresets' \
     "$PROJECT_DIR/app/src/main/jni/display_probe_worker.h"
-for style in olive_pocket cga_shock one_bit_desktop consumer_crt vhs_rental \
-    soviet_archive_1978 newsprint comic_ink piss_filter_2007 thermal_false_color; do
-    grep -q "\"$style\"" "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
-done
+grep -q 'kPhotoWidth = 320' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
+grep -q 'kPhotoHeight = 240' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
+grep -q 'savePhoto' "$PROJECT_DIR/app/src/main/jni/photo_store.cpp"
+grep -q 'WRITE_EXTERNAL_STORAGE' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
 if grep -q 'android.permission.INTERNET' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then
     echo "RetroLens must not request Internet permission" >&2
     exit 1
 fi
-if grep -q 'android.permission.WRITE_EXTERNAL_STORAGE' \
-    "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then
-    echo "Safe baseline must not request external-storage write permission" >&2
+if grep -Eq 'nativeToggleRecording|SonyMovieController' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
+    echo "Photo-only activity must not invoke a video path" >&2
     exit 1
 fi
 
@@ -164,7 +170,4 @@ temporary_dir="$(mktemp -d)"
 trap 'rm -rf "$temporary_dir"' EXIT
 unzip -p "$apk" lib/armeabi/libretrolens.so > "$temporary_dir/libretrolens.so"
 readelf -h "$temporary_dir/libretrolens.so" | grep -q 'Machine:.*ARM'
-if command -v ffprobe >/dev/null 2>&1; then
-    echo "ffprobe available for device-generated Retro Clip validation"
-fi
 echo "Complete RetroLens smoke suite passed"

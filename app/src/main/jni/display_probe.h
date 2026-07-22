@@ -18,6 +18,15 @@ enum SequenceProbeState {
     kSequenceStopping = 4
 };
 
+enum PhotoUiScene {
+    kPhotoSceneCamera = 0,
+    kPhotoSceneControls = 1,
+    kPhotoSceneBrowser = 2,
+    kPhotoSceneGallery = 3,
+    kPhotoSceneDiagnostics = 4,
+    kPhotoSceneDeleteConfirm = 5
+};
+
 struct SequenceProbeMetrics {
     int state;
     int receivedFrames;
@@ -38,6 +47,23 @@ struct FilterProbeMetrics {
     int processedFpsTenths;
     int selectedPreset;
     int styleChanges;
+    int intensity;
+    int parameterIndex;
+    int parameterValue;
+    int scene;
+    bool controlsVisible;
+    bool compare;
+    bool favorite;
+    bool focusActive;
+    bool diagnostics;
+    int photoStatus;
+    int photoSavedCount;
+    int photoFailedCount;
+    int photoEncodedBytes;
+    int galleryPhotoCount;
+    int galleryIndex;
+    int galleryPreset;
+    bool galleryHasThumbnail;
 };
 
 SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames,
@@ -48,7 +74,8 @@ SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames
 uint16_t probeRgb565(int red, int green, int blue);
 bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* buildId,
                         int surfaceWidth, int surfaceHeight, int surfaceFormat, int frameNumber,
-                        const SequenceProbeMetrics& sequence, const Pixel* filtered,
+                        const SequenceProbeMetrics& sequence, const Pixel* original,
+                        const Pixel* filtered, const Pixel* galleryThumbnail,
                         const FilterProbeMetrics& filter);
 
 } // namespace retrolens

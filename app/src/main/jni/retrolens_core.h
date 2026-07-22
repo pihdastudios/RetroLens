@@ -14,6 +14,7 @@ static const int kMaxPresets = 70;
 static const int kMaxAviFrames = 9000;
 static const bool kRetroClipEnabled = false;
 static const bool kProcessedDerivativeEnabled = false;
+static const bool kPhotoRuntimeEnabled = true;
 
 struct Pixel {
     uint8_t r;

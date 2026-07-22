@@ -1,21 +1,26 @@
 package io.pihda.retrolens;
 
 import android.graphics.PixelFormat;
+import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
+import android.os.SystemClock;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import java.nio.ByteBuffer;
 
 /** Owns the synchronous, storage-free native display probe. */
-public final class NativeDisplayProbeController implements SurfaceHolder.Callback {
+public final class NativeDisplayProbeController
+    implements SurfaceHolder.Callback, View.OnTouchListener {
   public static final int SEQUENCE_OFF = 0;
   public static final int SEQUENCE_STARTING = 1;
   public static final int SEQUENCE_ACTIVE = 2;
   public static final int SEQUENCE_ERROR = 3;
   public static final int SEQUENCE_STOPPING = 4;
   private static final int FRAME_INTERVAL_MS = 125;
-  private static final int MAX_EXPECTED_STOP_MS = 250;
+  private static final int MAX_EXPECTED_STOP_MS = 3000;
 
   public interface Listener {
     void onDisplayProbeResult(int status);
@@ -26,6 +31,7 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
   private final Listener listener;
   private final Handler handler = new Handler();
   private final int[] finalStats = new int[3];
+  private final int[] runtimeStats = new int[8];
   private final Runnable animationTick = new Runnable() {
     @Override
     public void run() {
@@ -39,6 +45,8 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
   private boolean surfaceReady;
   private boolean tickScheduled;
   private boolean firstPostReported;
+  private int reportedPhotoSaves;
+  private int reportedPhotoFailures;
 
   public NativeDisplayProbeController(SurfaceView view, Listener listener) {
     this.surfaceView = view;
@@ -53,12 +61,16 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
       return;
     active = true;
     firstPostReported = false;
+    reportedPhotoSaves = 0;
+    reportedPhotoFailures = 0;
     surfaceView.setVisibility(View.VISIBLE);
+    surfaceView.setOnTouchListener(this);
     if (!NativeBridge.load()) {
       fail(NativeBridge.SURFACE_NO_WINDOW);
       return;
     }
-    handle = NativeBridge.nativeCreateDisplayProbe(NativeBridge.BUILD_ID, FRAME_INTERVAL_MS);
+    handle = NativeBridge.nativeCreateDisplayProbe(NativeBridge.BUILD_ID, FRAME_INTERVAL_MS,
+        Environment.getExternalStorageDirectory().getAbsolutePath(), Build.MODEL, "1.0.0");
     if (handle == 0L) {
       fail(NativeBridge.SURFACE_NO_WINDOW);
       return;
@@ -74,6 +86,7 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
     tickScheduled = false;
     holder.removeCallback(this);
     surfaceReady = false;
+    surfaceView.setOnTouchListener(null);
     destroyNativeProbe();
     Logger.info("DisplayProbe: stopped");
   }
@@ -97,6 +110,35 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
   public synchronized int changeStyle(int delta) {
     long probe = handle;
     return probe == 0L ? -1 : NativeBridge.nativeChangeDisplayProbeStyle(probe, delta);
+  }
+
+  public synchronized boolean key(int key, boolean down) {
+    long probe = handle;
+    return probe != 0L
+        && NativeBridge.nativeDisplayProbeKey(probe, key, down, SystemClock.elapsedRealtime());
+  }
+
+  public synchronized int requestPhoto() {
+    long probe = handle;
+    return probe == 0L
+        ? NativeBridge.PHOTO_UNAVAILABLE
+        : NativeBridge.nativeRequestDisplayProbePhoto(probe, SystemClock.elapsedRealtime());
+  }
+
+  public synchronized void setFocus(boolean active) {
+    if (handle != 0L)
+      NativeBridge.nativeSetDisplayProbeFocus(handle, active);
+  }
+
+  @Override
+  public synchronized boolean onTouch(View view, MotionEvent event) {
+    if (handle == 0L || view.getWidth() <= 0 || view.getHeight() <= 0)
+      return false;
+    float x = event.getX() * 240.0f / view.getWidth();
+    float y = event.getY() * 180.0f / view.getHeight();
+    NativeBridge.nativeDisplayProbeTouch(
+        handle, event.getAction(), x, y, SystemClock.elapsedRealtime());
+    return true;
   }
 
   @Override
@@ -130,14 +172,26 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
     if (!active || !surfaceReady || handle == 0L || !holder.getSurface().isValid())
       return false;
     int status = NativeBridge.nativePostDisplayProbe(handle, holder.getSurface());
-    Logger.info("DisplayProbe: synchronous post status=" + status);
     if (status != NativeBridge.SURFACE_OK) {
+      Logger.error("PhotoRuntime: synchronous post failed status=" + status);
       fail(status);
       return false;
     }
     if (!firstPostReported) {
       firstPostReported = true;
+      Logger.info("PhotoRuntime: first synchronous post complete");
       listener.onDisplayProbeResult(status);
+    }
+    NativeBridge.nativeGetDisplayProbeStats(handle, runtimeStats);
+    if (runtimeStats[1] != reportedPhotoSaves) {
+      reportedPhotoSaves = runtimeStats[1];
+      Logger.info("PhotoRuntime: processed derivative saved count=" + runtimeStats[1]
+          + " bytes=" + runtimeStats[3] + " galleryCount=" + runtimeStats[5]);
+      Logger.flush();
+    }
+    if (runtimeStats[2] != reportedPhotoFailures) {
+      reportedPhotoFailures = runtimeStats[2];
+      Logger.error("PhotoRuntime: processed derivative failure count=" + runtimeStats[2]);
     }
     return true;
   }

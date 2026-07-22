@@ -6,7 +6,7 @@ import android.os.Handler;
 import com.sony.scalar.hardware.CameraEx;
 import java.nio.ByteBuffer;
 
-/** Bounded ten-style 4:3 panel probe with no storage or video path. */
+/** Photo-only RetroLens runtime with bounded analytical preview and derivative output. */
 public final class RetroLensActivity extends BaseActivity
     implements SonyCameraController.Listener, NativeDisplayProbeController.Listener,
                CameraSequenceFrameSource.Listener, CameraSequenceFrameSource.FrameConsumer {
@@ -37,7 +37,7 @@ public final class RetroLensActivity extends BaseActivity
         (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this);
     mainHandler = new Handler();
     Logger.startSession(NativeBridge.BUILD_ID);
-    Logger.info("RetroLens: style panel probe created model=" + Build.MODEL + " sdk="
+    Logger.info("RetroLens: photo runtime created model=" + Build.MODEL + " sdk="
         + Build.VERSION.SDK_INT + " abi=" + Build.CPU_ABI + " build=" + NativeBridge.BUILD_ID);
   }
 
@@ -55,12 +55,12 @@ public final class RetroLensActivity extends BaseActivity
     setAutoPowerOffMode(false);
     statusView.showStarting();
     cameraController.start();
-    Logger.info("RetroLens: style panel probe resume complete");
+    Logger.info("RetroLens: photo runtime resume complete");
   }
 
   @Override
   protected void onPause() {
-    Logger.info("RetroLens: style panel probe pause begin");
+    Logger.info("RetroLens: photo runtime pause begin");
     resumed = false;
     mainHandler.removeCallbacksAndMessages(null);
     readyCamera = null;
@@ -70,7 +70,7 @@ public final class RetroLensActivity extends BaseActivity
     displayProbeController.stop();
     if (sequenceStopped) {
       cameraController.stop();
-      Logger.info("RetroLens: style panel probe pause release complete");
+      Logger.info("RetroLens: photo runtime pause release complete");
     } else {
       cameraQuarantined = true;
       Logger.error(
@@ -180,6 +180,7 @@ public final class RetroLensActivity extends BaseActivity
   @Override
   protected boolean onFocusKeyDown() {
     cameraController.focus(true);
+    displayProbeController.setFocus(true);
     statusView.showTransient("FOCUS", "HALF PRESS", 350L);
     return true;
   }
@@ -187,13 +188,21 @@ public final class RetroLensActivity extends BaseActivity
   @Override
   protected boolean onFocusKeyUp() {
     cameraController.focus(false);
+    displayProbeController.setFocus(false);
     return true;
   }
 
   @Override
   protected boolean onShutterKeyDown() {
+    displayProbeController.key(NativeBridge.KEY_CAPTURE, true);
     if (cameraController.capture()) {
-      statusView.showTransient("CAPTURE", "SONY ORIGINAL", 700L);
+      int photoStatus = displayProbeController.requestPhoto();
+      if (photoStatus == NativeBridge.PHOTO_QUEUED)
+        statusView.showTransient("CAPTURE", "SONY ORIGINAL + RETRO DERIVATIVE", 900L);
+      else if (photoStatus == NativeBridge.PHOTO_BUSY)
+        statusView.showTransient("SONY CAPTURED", "RETRO PHOTO WRITER BUSY", 1000L);
+      else
+        statusView.showTransient("SONY CAPTURED", "RETRO DERIVATIVE UNAVAILABLE", 1000L);
     } else {
       statusView.showTransient("CAPTURE UNAVAILABLE", "WAIT FOR CAMERA", 900L);
     }
@@ -203,19 +212,26 @@ public final class RetroLensActivity extends BaseActivity
   @Override
   protected boolean onShutterKeyUp() {
     cameraController.releaseShutter();
+    displayProbeController.key(NativeBridge.KEY_CAPTURE, false);
     return true;
   }
 
   @Override
   protected boolean onMovieKeyDown() {
-    statusView.showTransient("VIDEO DISABLED", "STYLE PANEL PROBE - PHOTO ONLY", 1400L);
-    Logger.info("RetroLens: movie key ignored in style panel probe");
+    displayProbeController.key(NativeBridge.KEY_RECORD, true);
+    statusView.showTransient("PHOTO MODE", "VIDEO PROCESSING DISABLED", 1400L);
+    Logger.info("RetroLens: movie key ignored in photo-only runtime");
+    return true;
+  }
+
+  @Override
+  protected boolean onMovieKeyUp() {
     return true;
   }
 
   @Override
   protected boolean onLeftKeyDown() {
-    displayProbeController.changeStyle(-1);
+    displayProbeController.key(NativeBridge.KEY_PREVIOUS, true);
     return true;
   }
 
@@ -226,7 +242,7 @@ public final class RetroLensActivity extends BaseActivity
 
   @Override
   protected boolean onRightKeyDown() {
-    displayProbeController.changeStyle(1);
+    displayProbeController.key(NativeBridge.KEY_NEXT, true);
     return true;
   }
 
@@ -237,19 +253,103 @@ public final class RetroLensActivity extends BaseActivity
 
   @Override
   protected boolean onUpperDialTurned(boolean clockwise, int value) {
-    displayProbeController.changeStyle(clockwise ? 1 : -1);
+    displayProbeController.key(clockwise ? NativeBridge.KEY_NEXT : NativeBridge.KEY_PREVIOUS, true);
     return true;
   }
 
   @Override
   protected boolean onLowerDialTurned(boolean clockwise, int value) {
-    displayProbeController.changeStyle(clockwise ? 1 : -1);
+    displayProbeController.key(clockwise ? NativeBridge.KEY_NEXT : NativeBridge.KEY_PREVIOUS, true);
+    return true;
+  }
+
+  @Override
+  protected boolean onUpKeyDown() {
+    displayProbeController.key(NativeBridge.KEY_UP, true);
+    return true;
+  }
+
+  @Override
+  protected boolean onUpKeyUp() {
+    return true;
+  }
+
+  @Override
+  protected boolean onDownKeyDown() {
+    displayProbeController.key(NativeBridge.KEY_DOWN, true);
+    return true;
+  }
+
+  @Override
+  protected boolean onDownKeyUp() {
+    return true;
+  }
+
+  @Override
+  protected boolean onEnterKeyDown() {
+    displayProbeController.key(NativeBridge.KEY_CONFIRM, true);
+    return true;
+  }
+
+  @Override
+  protected boolean onEnterKeyUp() {
+    return true;
+  }
+
+  @Override
+  protected boolean onMenuKeyDown() {
+    displayProbeController.key(NativeBridge.KEY_BROWSER, true);
+    return true;
+  }
+
+  @Override
+  protected boolean onMenuKeyUp() {
+    return true;
+  }
+
+  @Override
+  protected boolean onPlayKeyDown() {
+    displayProbeController.key(NativeBridge.KEY_GALLERY, true);
+    return true;
+  }
+
+  @Override
+  protected boolean onPlayKeyUp() {
+    return true;
+  }
+
+  @Override
+  protected boolean onC1KeyDown() {
+    displayProbeController.key(NativeBridge.KEY_COMPARE, true);
+    return true;
+  }
+
+  @Override
+  protected boolean onC1KeyUp() {
+    displayProbeController.key(NativeBridge.KEY_COMPARE, false);
+    return true;
+  }
+
+  @Override
+  protected boolean onFnKeyDown() {
+    displayProbeController.key(NativeBridge.KEY_DIAGNOSTICS, true);
+    return true;
+  }
+
+  @Override
+  protected boolean onFnKeyUp() {
+    return true;
+  }
+
+  @Override
+  protected boolean onDeleteKeyDown() {
+    if (!displayProbeController.key(NativeBridge.KEY_BACK, true))
+      onBackPressed();
     return true;
   }
 
   @Override
   protected boolean onDeleteKeyUp() {
-    onBackPressed();
     return true;
   }
 

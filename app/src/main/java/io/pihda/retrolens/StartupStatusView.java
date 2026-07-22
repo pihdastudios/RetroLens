@@ -25,7 +25,7 @@ public final class StartupStatusView extends View {
   };
   private int mode = MODE_STARTING;
   private String title = "RETROLENS";
-  private String detail = "STARTING TEN STYLE PROBE";
+  private String detail = "STARTING PHOTO ENGINE";
 
   public StartupStatusView(Context context, AttributeSet attributes) {
     super(context, attributes);
@@ -38,7 +38,7 @@ public final class StartupStatusView extends View {
     removeCallbacks(restoreReady);
     mode = MODE_STARTING;
     title = "RETROLENS";
-    detail = "STARTING TEN STYLE PROBE";
+    detail = "STARTING PHOTO ENGINE";
     invalidate();
   }
 
@@ -78,7 +78,7 @@ public final class StartupStatusView extends View {
     canvas.drawText("RETROLENS", 20, 27, paint);
     paint.setTextSize(13.0f);
     paint.setColor(Color.rgb(66, 232, 188));
-    canvas.drawText("STYLE PANEL", width - 140, 26, paint);
+    canvas.drawText("PHOTO ENGINE", width - 150, 26, paint);
 
     if (mode == MODE_READY) {
       paint.setColor(Color.argb(155, 13, 17, 18));
@@ -86,7 +86,7 @@ public final class StartupStatusView extends View {
       paint.setTextSize(12.0f);
       paint.setColor(Color.rgb(220, 216, 200));
       canvas.drawText(
-          "PHOTO ONLY  /  LEFT RIGHT OR DIAL FOR STYLE  /  VIDEO DISABLED", 20, height - 12, paint);
+          "PHOTO ONLY / CENTER CONTROLS / MENU STYLES / PLAY GALLERY", 20, height - 12, paint);
       return;
     }
 

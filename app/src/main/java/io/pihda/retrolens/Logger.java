@@ -4,7 +4,7 @@ import android.os.Environment;
 import java.io.*;
 
 public class Logger {
-  public static final boolean EXTERNAL_LOGGING_ENABLED = false;
+  public static final boolean EXTERNAL_LOGGING_ENABLED = true;
   private static final int MAX_BUFFER_CHARS = 32768;
   private static final StringBuffer pending = new StringBuffer();
 
