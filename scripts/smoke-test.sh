@@ -35,7 +35,9 @@ grep -q 'RETRO_CLIP_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'PROCESSED_DERIVATIVE_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
-grep -q 'SAFE_BASELINE_ENABLED = true' \
+grep -q 'SAFE_BASELINE_ENABLED = false' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
+grep -q 'DISPLAY_PROBE_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'ANALYTICAL_PREVIEW_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
@@ -43,8 +45,10 @@ grep -q 'NATIVE_OUTPUT_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'EXTERNAL_LOGGING_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
+grep -q 'nativeProbeSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"
+grep -q 'display_probe.cpp display_probe_jni.cpp' "$PROJECT_DIR/app/src/main/jni/Android.mk"
 if grep -q 'retroLensSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_retrolens.xml"; then
-    echo "Safe baseline must contain only the Sony preview surface" >&2
+    echo "Display probe must not restore the full native output surface" >&2
     exit 1
 fi
 if grep -q 'new CameraSequenceFrameSource' \
@@ -54,7 +58,17 @@ if grep -q 'new CameraSequenceFrameSource' \
 fi
 if grep -q 'NativeBridge.load' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
-    echo "Safe baseline must not load the native runtime" >&2
+    echo "Activity must delegate native loading to the isolated display probe" >&2
+    exit 1
+fi
+if grep -q 'nativeCreate(' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"; then
+    echo "Display probe must not create the full native runtime" >&2
+    exit 1
+fi
+if grep -Eq 'CameraSequence|Environment|getExternalStorageDirectory|new Thread' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"; then
+    echo "Display probe must remain synchronous and storage-free" >&2
     exit 1
 fi
 if grep -q 'android.permission.INTERNET' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then

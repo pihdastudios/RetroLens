@@ -5,3 +5,5 @@
 /*.iml
 app/.externalNativeBuild/
 app/src/main/jniLibs/armeabi/libretrolens.so
+releases/*
+native-tests/build/*

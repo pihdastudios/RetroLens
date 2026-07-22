@@ -9,6 +9,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <SurfaceView
+        android:id="@+id/nativeProbeSurface"
+        android:layout_width="256dp"
+        android:layout_height="144dp"
+        android:layout_gravity="right|center_vertical"
+        android:layout_marginRight="18dp" />
+
     <io.pihda.retrolens.StartupStatusView
         android:id="@+id/startupStatus"
         android:layout_width="match_parent"

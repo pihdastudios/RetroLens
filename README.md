@@ -2,7 +2,7 @@
 
 RetroLens is a retro-effects camera project for the Sony a5100 OpenMemories environment. Its effects engine remains implemented in native C++, while the current hardware-recovery build deliberately runs only Sony's normal preview and still-capture path.
 
-The current `safe-preview-20260722-b` build disables CameraSequence, native output, Retro Clip, processed derivatives, and external-card logging at runtime. It creates no analytical-preview or native worker and loads no native runtime. This isolates a previously observed camera-pipeline wedge before effects are reintroduced.
+The current `native-probe-20260722-c` build keeps CameraSequence, the full native runtime, Retro Clip, processed derivatives, and external-card logging disabled. It adds one small synchronous native display probe above the proven Sony preview without creating a native worker or retaining a native window or frame buffer.
 
 The project never modifies firmware, calibration data, boot partitions, or Sony originals.
 
@@ -12,8 +12,9 @@ The project never modifies firmware, calibration data, boot partitions, or Sony 
 - The package has installed successfully through Sony-PMCA-RE on an ILCE-5100.
 - CameraSequence itself was previously measured on this same camera in the source baseline at roughly 9–10 analytical JPEG frames per second.
 - The prior stability build produced an immediate black screen and left the next normal-camera capture stuck at `Writing memory`; battery removal was required. It must not be used for further testing.
-- Safety APK SHA-256 `c71655c7f71dff4c107954fc09c1478494f3cc61fd2528b79c74b0015cc14b63` builds, verifies, requests only camera permission, and installed successfully through Sony-PMCA-RE.
-- The safety baseline requires the two-phase physical exit/capture test in `DEVICE_FINDINGS.md` before its lifecycle can be called hardware-tested.
+- Safety APK SHA-256 `c71655c7f71dff4c107954fc09c1478494f3cc61fd2528b79c74b0015cc14b63` passed both physical lifecycle phases: five capture-free open/exit cycles followed by normal-camera captures, then capture inside RetroLens followed by a normal-camera capture. Six corresponding Sony originals were confirmed.
+- The proven recovery APK is preserved as `releases/RetroLens-1.0.0-safe-preview.apk`.
+- Native display probe APK SHA-256 `cb7b6cd9658395e6e1d5c7ea98d1225a7a1cdb16e92762bce4ea3c49be99d87f` builds and host-tests successfully but requires the same two-phase physical test before it can be promoted.
 - No screenshots have yet been captured from the physical camera.
 
 See `DEVICE_FINDINGS.md` for the exact evidence boundary.
@@ -23,10 +24,11 @@ See `DEVICE_FINDINGS.md` for the exact evidence boundary.
 ```text
 CameraEx -> one Sony-owned normal preview SurfaceView
          -> autofocus and still capture
-Java View -> safe-build status and physical-key feedback
+JNI      -> one synchronous 256x144 native display post
+Java View -> probe status and physical-key feedback
 ```
 
-Java owns the active safety baseline and deterministic camera teardown. The dormant C++ engine still owns filters, bounded temporal state, persistence, MJPEG/AVI support, and native UI when those features are enabled in a later hardware-gated build.
+Java owns the camera and probe lifecycle. The probe locks, paints, posts, and releases its `ANativeWindow` within one UI-thread call using a stack raster. The dormant C++ engine still owns filters, bounded temporal state, persistence, MJPEG/AVI support, and native UI for later hardware-gated builds.
 
 ## Toolchain
 
@@ -73,7 +75,7 @@ Effects touch gestures and touch-to-focus are disabled in the safety baseline.
 
 ## Interface
 
-The safety interface is a transparent Java overlay above the sole Sony preview surface. It identifies the build, camera readiness, focus/capture feedback, and intentionally disabled video without hiding the live view.
+The interface keeps the Sony preview full-screen, adds a transparent Java status overlay, and places a 256×144 native diagnostic panel at the right center. The panel shows color bars, `NATIVE DISPLAY OK`, actual surface geometry/format, build ID, and confirmation that CameraSequence is inactive.
 
 The UI exposes descriptive controls. Internally each preset has a stable ID, category, description, tier, control mask, tuned grade, and a graph assembled from bounded shared passes.
 
@@ -111,7 +113,7 @@ This is explicitly a preview-resolution derivative. Full-resolution post-process
 
 ### Retro Clip
 
-Retro Clip is runtime-disabled in `safe-preview-20260722-b`. Its bounded MJPEG/AVI implementation remains compiled and host-tested, but the native runtime is not loaded and the movie key cannot start an output file.
+Retro Clip is runtime-disabled in `native-probe-20260722-c`. Its bounded MJPEG/AVI implementation remains compiled and host-tested, but the full native runtime is not created and the movie key cannot start an output file.
 
 Files are written to `.tmp`, finalized with `idx1`, patched, flushed, and atomically renamed. Activity interruption produces a finalized filename ending in `.incomplete` and an `interrupted: true` sidecar rather than pretending the clip is complete.
 
@@ -129,13 +131,13 @@ RetroLens makes no full-HD baked-filter, H.264, audio, or encoder/ISP intercepti
 
 ## Performance and memory
 
-The safety build performs no analytical JPEG decoding, filter processing, native composition, recording, or app-owned card I/O. Its active workload is the Sony normal preview plus a small Java status overlay.
+The probe build performs no analytical JPEG decoding, filter processing, recording, or app-owned card I/O. Its only native work is one bounded synchronous diagnostic raster/post per surface creation or change.
 
 The performance controller monitors decode, filter, render, and dropped-frame measurements and controls accepted cadence. The renderer sleeps between new frames and UI animation deadlines. SIMD, handwritten assembly, OpenGL ES, and larger JPEG libraries remain deferred until device measurements prove the optimized integer path insufficient and confirm CPU capabilities.
 
 ## Storage and configuration
 
-External logging and all `RETROLENS/` writes are disabled in the safety build so card activity cannot contaminate lifecycle testing. The safety APK does not request external-storage write permission. The dormant engine retains this layout for later builds:
+External logging and all `RETROLENS/` writes are disabled in the probe build so card activity cannot contaminate lifecycle testing. The APK does not request external-storage write permission. The dormant engine retains this layout for later builds:
 
 ```text
 RETROLENS/
@@ -151,11 +153,12 @@ Settings are versioned and atomically replaced. Invalid values fall back to safe
 
 ## Troubleshooting
 
-- Pure black screen in the safety build: stop testing and report whether the `SAFE PREVIEW` header appeared; there is no second native surface to hide the Sony preview.
+- A black or absent probe panel with working Sony preview is a native display-probe failure, not a camera failure. Report the visible `E` code; the panel hides itself after a failed post.
+- A fully black screen is unexpected because the probe occupies only 256×144. Stop testing and reinstall the preserved safety APK.
 - `Writing memory` persisting after exit: do not launch RetroLens again. Allow a normal power-off if possible and avoid removing the battery while the card LED is active unless the camera is irrecoverably wedged.
 - Build cannot find tools: run `./scripts/toolchain-info.sh`; this project expects the workspace `toolchain/` directory and JDK 8.
 - Install cannot find camera: set USB Connection to Mass Storage or leave it in app-install mode and run `./scripts/usb-status.sh`.
-- The safety build deliberately produces no `RETROLENS/LOG.TXT`; validation uses its visible build/status text and observed capture/exit behavior.
+- The probe build deliberately produces no `RETROLENS/LOG.TXT`; validation uses its visible geometry/status text and observed capture/exit behavior.
 
 ## Dependencies, licenses, and unresolved questions
 

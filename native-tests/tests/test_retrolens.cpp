@@ -1,3 +1,4 @@
+#include "display_probe.h"
 #include "jpeg_encoder.h"
 #include "retrolens_core.h"
 #include "third_party/picojpeg/picojpeg.h"
@@ -130,6 +131,37 @@ static void testSurfaceBlitBoundsAndFormats() {
     assert(!blitRgb565(source, 2, 2, rgba, 3, 5, 3, 99));
 }
 
+static unsigned long checksum16(const uint16_t* pixels, int count) {
+    unsigned long value = 2166136261UL;
+    for (int index = 0; index < count; index++) {
+        value ^= pixels[index];
+        value *= 16777619UL;
+    }
+    return value;
+}
+
+static void testDisplayProbeRaster() {
+    uint16_t guarded[2 + 13 * 9 + 2];
+    for (int index = 0; index < (int)(sizeof(guarded) / sizeof(guarded[0])); index++)
+        guarded[index] = 0x55aa;
+    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4));
+    assert(guarded[0] == 0x55aa && guarded[1] == 0x55aa);
+    assert(guarded[2 + 13 * 9] == 0x55aa && guarded[2 + 13 * 9 + 1] == 0x55aa);
+    assert(checksum16(guarded + 2, 13 * 9) != 0);
+
+    uint16_t first[kDisplayProbeWidth * kDisplayProbeHeight];
+    uint16_t second[kDisplayProbeWidth * kDisplayProbeHeight];
+    assert(renderDisplayProbe(first, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
+                              256, 144, 4));
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
+                              256, 144, 4));
+    assert(!memcmp(first, second, sizeof(first)));
+    assert(checksum16(first, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
+    assert(first[0] == probeRgb565(66, 232, 188));
+    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4));
+    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4));
+}
+
 static void testPerformanceController() {
     PerformanceDecision fast = choosePerformance(20, 15, 5, 0, -1);
     assert(fast.targetFps == 10 && !fast.reducedAnimation);
@@ -207,6 +239,7 @@ int main() {
     testAllPresetsAndTinyImages();
     testDeterminismAndBayer();
     testSurfaceBlitBoundsAndFormats();
+    testDisplayProbeRaster();
     testPerformanceController();
     testJsonEscaping();
     testJpegAndAvi();

@@ -22,15 +22,18 @@ Those results came from the source WaveSnap/PMCADemo baseline. They justify the 
 - Physical testing of `stability-20260722-a` still showed a pure black screen. The shutter worked inside RetroLens and the Movie button had no visible effect. After exiting, the next shutter press in Sony's normal camera application remained at `Writing memory` with the red media LED continuously active; battery removal was required. This is a severe lifecycle regression, so that build is retired from hardware testing.
 - The card had ample free space when inspected afterward. No `RETROLENS/` directory or log existed, so external app output did not fill the card and cannot explain the wedge.
 - Static review found two concrete risks in the retired build: it forced high display color depth despite the proven camera apps using low depth, and it released `CameraEx` even after reporting that the CameraSequence worker had failed to stop. Its opaque second SurfaceView could also cover both normal preview and Java fallback after a successful initial surface probe followed by a later render failure.
-- Safety build `safe-preview-20260722-b`, APK SHA-256 `c71655c7f71dff4c107954fc09c1478494f3cc61fd2528b79c74b0015cc14b63`, removes CameraSequence and native runtime activation, the second SurfaceView, processed outputs, video, external logging, and the external-storage permission. It built, verified, and installed successfully through Sony-PMCA-RE. Hardware results are pending and must follow the staged test below.
+- Safety build `safe-preview-20260722-b`, APK SHA-256 `c71655c7f71dff4c107954fc09c1478494f3cc61fd2528b79c74b0015cc14b63`, passed both physical test phases. The user confirmed normal preview/capture and clean post-exit normal-camera operation. Six new originals (`DSC05026.JPG` through `DSC05031.JPG`) were confirmed on the card at regular intervals, and no `RETROLENS/` directory was created. No `Writing memory` wedge, persistent media LED, or battery removal recurred.
+- The proven safety APK is preserved as `releases/RetroLens-1.0.0-safe-preview.apk` with its checksum.
+- Native display probe `native-probe-20260722-c`, APK SHA-256 `cb7b6cd9658395e6e1d5c7ea98d1225a7a1cdb16e92762bce4ea3c49be99d87f`, adds a 256×144 synchronous native panel only. It retains no native window or pixel buffer after posting and creates no native worker, CameraSequence, full runtime, recorder, settings, or card output. Host tests and build verification pass; physical results are pending.
 - The latest PMCADemo log showed many consecutive Boot/Exit receiver messages while navigating the Sony application menu. PMCADemo and LegacyAlphaRemote receiver behavior is being audited separately and has not been changed.
 
 ## Open hardware checks
 
-1. Open and exit the safety build five times without capture. After every exit, take one photo in Sony's normal camera application and confirm writing completes normally.
-2. Take one photo inside RetroLens, wait for its media LED to stop, exit, then take one normal-camera photo and confirm writing completes normally.
-3. Verify visible normal preview, `SAFE PREVIEW` status, autofocus, still capture, disabled Movie message, Delete/back exit, and application-menu responsiveness.
-4. Only after both safety phases pass, test native output without CameraSequence in a separate build.
-5. Only after native output remains lifecycle-safe, reintroduce CameraSequence with strict worker quarantine and repeat the five-cycle exit test before filters.
+1. Confirm the native probe panel shows color bars, `NATIVE DISPLAY OK`, build ID, and actual surface geometry/format while normal Sony preview remains visible.
+2. Open and exit the probe five times without capture. After every exit, take one normal-camera photo and confirm writing completes normally.
+3. Take one photo inside RetroLens, wait for its media LED to stop, exit, then take one normal-camera photo and confirm writing completes normally.
+4. Verify autofocus, still capture, disabled Movie message, Delete/back exit, and application-menu responsiveness.
+5. Only after the probe passes may a later build test a bounded native render thread without CameraSequence.
+6. Only after the native thread passes may CameraSequence return, with strict worker quarantine and the same repeated exit test before filters.
 
 No item in this section may be promoted to “working on a5100” without `RETROLENS/LOG.TXT` evidence.

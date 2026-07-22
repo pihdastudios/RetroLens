@@ -6,8 +6,10 @@ import android.os.Handler;
 import com.sony.scalar.hardware.CameraEx;
 
 /** Camera-safe Sony lifecycle baseline. Native effects remain compiled but are not started. */
-public final class RetroLensActivity extends BaseActivity implements SonyCameraController.Listener {
+public final class RetroLensActivity extends BaseActivity
+    implements SonyCameraController.Listener, NativeDisplayProbeController.Listener {
   private SonyCameraController cameraController;
+  private NativeDisplayProbeController displayProbeController;
   private StartupStatusView statusView;
   private Handler mainHandler;
   private boolean resumed;
@@ -20,9 +22,11 @@ public final class RetroLensActivity extends BaseActivity implements SonyCameraC
     statusView = (StartupStatusView) findViewById(R.id.startupStatus);
     cameraController = new SonyCameraController(
         (android.view.SurfaceView) findViewById(R.id.sonyPreviewSurface), this);
+    displayProbeController = new NativeDisplayProbeController(
+        (android.view.SurfaceView) findViewById(R.id.nativeProbeSurface), this);
     mainHandler = new Handler();
     Logger.startSession(NativeBridge.BUILD_ID);
-    Logger.info("RetroLens: safe baseline created model=" + Build.MODEL + " sdk="
+    Logger.info("RetroLens: native display probe created model=" + Build.MODEL + " sdk="
         + Build.VERSION.SDK_INT + " abi=" + Build.CPU_ABI + " build=" + NativeBridge.BUILD_ID);
   }
 
@@ -33,17 +37,18 @@ public final class RetroLensActivity extends BaseActivity implements SonyCameraC
     setAutoPowerOffMode(false);
     statusView.showStarting();
     cameraController.start();
-    Logger.info("RetroLens: safe baseline resume complete");
+    Logger.info("RetroLens: native display probe resume complete");
   }
 
   @Override
   protected void onPause() {
-    Logger.info("RetroLens: safe baseline pause begin");
+    Logger.info("RetroLens: native display probe pause begin");
     resumed = false;
     mainHandler.removeCallbacksAndMessages(null);
+    displayProbeController.stop();
     cameraController.stop();
     setAutoPowerOffMode(true);
-    Logger.info("RetroLens: safe baseline pause release complete");
+    Logger.info("RetroLens: native display probe pause release complete");
     Logger.flush();
     super.onPause();
   }
@@ -53,7 +58,19 @@ public final class RetroLensActivity extends BaseActivity implements SonyCameraC
     if (!resumed)
       return;
     statusView.showReady();
+    displayProbeController.start();
     Logger.info("RetroLens: Sony normal preview ready");
+  }
+
+  @Override
+  public void onDisplayProbeResult(int status) {
+    if (!resumed)
+      return;
+    if (status == NativeBridge.SURFACE_OK) {
+      statusView.showTransient("NATIVE DISPLAY OK", "NORMAL PREVIEW ACTIVE", 1200L);
+    } else {
+      statusView.showError("NATIVE PROBE FAILED  E" + status, "SONY PREVIEW REMAINS ACTIVE");
+    }
   }
 
   @Override
