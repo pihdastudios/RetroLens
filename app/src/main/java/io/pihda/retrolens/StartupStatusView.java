@@ -14,13 +14,13 @@ public final class StartupStatusView extends View {
   private static final int MODE_READY = 1;
   private static final int MODE_ERROR = 2;
   private static final int MODE_TRANSIENT = 3;
+  private static final int MODE_COMPACT = 4;
 
   private final Paint paint = new Paint();
   private final Runnable restoreReady = new Runnable() {
     @Override
     public void run() {
-      mode = MODE_READY;
-      invalidate();
+      showReady();
     }
   };
   private int mode = MODE_STARTING;
@@ -32,10 +32,13 @@ public final class StartupStatusView extends View {
     paint.setAntiAlias(true);
     paint.setTypeface(Typeface.DEFAULT_BOLD);
     setWillNotDraw(false);
+    setClickable(false);
+    setFocusable(false);
   }
 
   public void showStarting() {
     removeCallbacks(restoreReady);
+    setVisibility(VISIBLE);
     mode = MODE_STARTING;
     title = "RETROLENS";
     detail = "STARTING PHOTO ENGINE";
@@ -45,11 +48,12 @@ public final class StartupStatusView extends View {
   public void showReady() {
     removeCallbacks(restoreReady);
     mode = MODE_READY;
-    invalidate();
+    setVisibility(GONE);
   }
 
   public void showError(String newTitle, String newDetail) {
     removeCallbacks(restoreReady);
+    setVisibility(VISIBLE);
     mode = MODE_ERROR;
     title = newTitle == null ? "CAMERA UNAVAILABLE" : newTitle;
     detail = newDetail == null ? "" : newDetail;
@@ -58,11 +62,21 @@ public final class StartupStatusView extends View {
 
   public void showTransient(String newTitle, String newDetail, long durationMs) {
     removeCallbacks(restoreReady);
+    setVisibility(VISIBLE);
     mode = MODE_TRANSIENT;
     title = newTitle == null ? "RETROLENS" : newTitle;
     detail = newDetail == null ? "" : newDetail;
     invalidate();
     postDelayed(restoreReady, durationMs);
+  }
+
+  public void showCompact(String newTitle, String newDetail) {
+    removeCallbacks(restoreReady);
+    setVisibility(VISIBLE);
+    mode = MODE_COMPACT;
+    title = newTitle == null ? "EFFECTS STARTING" : newTitle;
+    detail = newDetail == null ? "SONY PREVIEW ACTIVE" : newDetail;
+    invalidate();
   }
 
   @Override
@@ -72,6 +86,19 @@ public final class StartupStatusView extends View {
       return;
     int width = getWidth();
     int height = getHeight();
+
+    if (mode == MODE_COMPACT) {
+      int panelTop = height - 34;
+      paint.setColor(Color.argb(205, 13, 17, 18));
+      canvas.drawRect(0, panelTop, width, height, paint);
+      paint.setTextSize(13.0f);
+      paint.setColor(Color.rgb(66, 232, 188));
+      canvas.drawText(title, 18, panelTop + 14, paint);
+      paint.setTextSize(10.0f);
+      paint.setColor(Color.rgb(239, 232, 211));
+      canvas.drawText(detail, 18, panelTop + 28, paint);
+      return;
+    }
 
     paint.setColor(Color.argb(190, 13, 17, 18));
     canvas.drawRect(0, 0, width, 42, paint);

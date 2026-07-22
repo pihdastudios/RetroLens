@@ -227,7 +227,9 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
             snprintf(line, sizeof(line), "CARD S%d W%d E%d", filter.photoStorageState,
                      filter.photoWriteStage, filter.photoWriteError);
             text(pixels, width, height, 3, 78, line,
-                 filter.photoStorageState == 1 ? accent : probeRgb565(255, 150, 110));
+                 filter.photoStorageState == 1 || filter.photoStorageState == 7
+                     ? accent
+                     : probeRgb565(255, 150, 110));
             text(pixels, width, height, 3, 166, "FN CLOSE", accent);
         } else if (filter.controlsVisible) {
             rectangle(pixels, width, height, 0, 0, width, 12, background);
@@ -266,6 +268,8 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
                 photoMessage = "RETRO INDEX FAILED";
             else if (filter.photoStorageState == 6)
                 photoMessage = "RETRO WRITE TEST FAILED";
+            else if (filter.photoStorageState == 7)
+                photoMessage = "RETRO STORAGE STARTING";
             else
                 photoMessage = "RETRO CARD NOT READY";
         } else if (filter.photoStatus == 9)
@@ -273,8 +277,10 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
         if (photoMessage && !galleryScene) {
             rectangle(pixels, width, height, 30, 78, 210, 94, background);
             text(pixels, width, height, 35, 82, photoMessage,
-                 filter.photoStatus == 3 || filter.photoStatus == 8 ? probeRgb565(255, 150, 110)
-                                                                    : accent);
+                 filter.photoStatus == 3 ||
+                         (filter.photoStatus == 8 && filter.photoStorageState != 7)
+                     ? probeRgb565(255, 150, 110)
+                     : accent);
         }
         if (imbalance || filter.decodeError) {
             rectangle(pixels, width, height, 30, 62, 210, 96, background);

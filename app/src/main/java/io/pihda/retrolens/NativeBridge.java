@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 
 /** Narrow photo-only JNI boundary. Pixels, UI, and persistence remain native. */
 public final class NativeBridge {
-  public static final String BUILD_ID = "storage-ui-fix-20260722-k";
+  public static final String BUILD_ID = "startup-recovery-20260722-l";
   public static final boolean SAFE_BASELINE_ENABLED = false;
   public static final boolean DISPLAY_PROBE_ENABLED = true;
   public static final boolean DISPLAY_PROBE_THREAD_ENABLED = true;

@@ -73,6 +73,7 @@ class DisplayProbeWorker {
                     int* frameNumber);
     bool waitForFrame(int minimumFrame, int timeoutMs);
     bool waitForProcessedFrame(int minimumFrame, int timeoutMs);
+    bool waitForStorageInitialization(int timeoutMs);
     bool waitForPhotoResult(int minimumResults, int timeoutMs);
     void getStats(int* frameCount, int* postCount);
     void getFilterStats(FilterProbeMetrics* metrics);
@@ -103,6 +104,8 @@ class DisplayProbeWorker {
     bool threadStarted_;
     bool photoRunning_;
     bool photoThreadStarted_;
+    bool storageInitializationComplete_;
+    int initialStorageStatus_;
     int intervalMs_;
     int frameCount_;
     int postCount_;

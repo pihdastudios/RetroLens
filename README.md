@@ -11,6 +11,7 @@ This build deliberately contains no linked video runtime. The Movie button is co
 - Earlier staged builds physically proved normal preview/capture, clean CameraSequence shutdown, the 8 FPS native display thread, analytical JPEG delivery, and moving Olive Pocket output on an ILCE-5100.
 - The installed photo-runtime candidate displayed moving effects, but only in the deliberately small panel. The user also could not see the processed result in the in-app gallery.
 - The `fullscreen-photo-20260722-i` candidate removes the small-window geometry request, fills the actual locked display buffer, and renders the saved processed thumbnail full-screen in the RetroLens gallery. It is host-tested but has not been installed or physically tested.
+- The `startup-recovery-20260722-l` candidate removes storage and first-frame work from the startup-overlay gate. It keeps native output hidden until a filtered frame exists, reduces the splash to a compact Sony-preview fallback after 800 ms, and initializes derivative storage on the native photo worker. It passes host sanitizers and the legacy APK suite but is not hardware-tested or installed.
 
 Exact staged evidence and preserved recovery hashes are in `DEVICE_FINDINGS.md`.
 
@@ -19,14 +20,14 @@ Exact staged evidence and preserved recovery hashes are in `DEVICE_FINDINGS.md`.
 ```text
 CameraEx -> Sony normal preview SurfaceView -> autofocus + Sony original capture
 CameraSequence worker -> one reusable direct JPEG buffer -> one bounded native JPEG slot
-native process worker -> reduced 80x60 decode -> preset graph + temporal history -> 240x180 logical UI
-native post -> center-crop scale into the actual locked full-screen buffer
-native photo worker -> one 80x60 snapshot -> 320x240 JPEG + JSON + thumbnail + atomic index
+hidden native process worker -> reduced 80x60 decode -> preset graph + temporal history
+first filtered frame -> reveal native surface -> full-screen 240x180 logical UI
+native photo worker -> card verification -> one snapshot -> JPEG + JSON + thumbnail + atomic index
 ```
 
 Java owns Android/Sony lifecycle, camera calls, one analytical polling thread, the direct buffer, physical-key routing, touch forwarding, and the display cadence runnable. Pixel processing, preset state, UI composition, derivative encoding, settings, gallery indexing, and photo file transactions are native.
 
-Every Sony `DeviceMemory` is released in `finally`. Busy frames are dropped rather than queued. Pause stops CameraSequence polling, joins the analytical consumer, stops the native workers, and only then releases `CameraEx`; a Sony worker that does not stop causes the camera object to be quarantined rather than released beneath a live call.
+Every Sony `DeviceMemory` is released in `finally`. Busy frames are dropped rather than queued. The analytical sequence starts after the hidden native runtime exists and does not wait for storage or a display surface. The opaque native surface is revealed only after a filtered frame is ready; until then the Sony preview remains visible. Pause stops CameraSequence polling, joins the analytical consumer, stops the native workers, and only then releases `CameraEx`; a Sony worker that does not stop causes the camera object to be quarantined rather than released beneath a live call.
 
 ## Toolchain
 
@@ -49,7 +50,7 @@ From `RetroLens/`:
 ./scripts/build-apk.sh --clean
 ./scripts/verify-apk.sh
 ./scripts/package-release.sh --existing
-./scripts/install.sh releases/RetroLens-1.0.0-fullscreen-photo.apk
+./scripts/install.sh releases/RetroLens-1.0.0-startup-recovery.apk
 ```
 
 The normal build output is `app/build/outputs/apk/RetroLens-debug-1.0.0.apk`. Installation requires a Sony-PMCA-RE-compatible USB mode.
@@ -74,7 +75,7 @@ Touch supports horizontal style swipes, tap-to-hide/show controls, and long-pres
 
 ## Interface and presets
 
-The native UI uses a dark charcoal base, warm text, restrained mint accent, a five-card style browser, quick controls, compare labels, focus and capture state, hidden diagnostics, and an app-only gallery. Its compact camera bars auto-hide after two seconds and reappear after input; modal drawers and gallery scenes remain visible. The Java startup view becomes transparent after the first processed frame, so it cannot cover the native filter name. Its logical 240x180 compositor is center-crop scaled across the actual locked display buffer instead of requesting a small Android window. The normal Sony preview remains underneath and is revealed if surface posting, CameraSequence startup, or repeated analytical decoding fails.
+The native UI uses a dark charcoal base, warm text, restrained mint accent, a five-card style browser, quick controls, compare labels, focus and capture state, hidden diagnostics, and an app-only gallery. Its compact camera bars auto-hide after two seconds and reappear after input; modal drawers and gallery scenes remain visible. The full startup panel has an 800 ms deadline, then becomes a small `EFFECTS STARTING` strip over the usable Sony preview. A successful first filtered surface removes the Java view from layout entirely so it cannot cover native filter names. Its logical 240x180 compositor is center-crop scaled across the actual locked display buffer instead of requesting a small Android window. Surface, sequence, or decode failure hides native output and preserves Sony preview and capture.
 
 All 70 requested presets ship across Handheld, Computer, Console, Analog TV, Tape, Film, Archive, Print, Digital Decay, Game Era, and Experimental categories. This includes Olive Pocket, Soviet Archive 1978, Piss Filter 2007 / Seventh-Gen Amber, Comic Ink, Newsprint, and Thermal False Color. Presets are declarative bounded graphs using shared integer passes. Thermal and infrared modes are simulated color mappings, not sensor measurements.
 
@@ -94,7 +95,7 @@ RETROLENS/THUMBNAILS/<timestamp>_<preset>_preview.rgb
 
 The derivative is explicitly preview-resolution at 320x240. Its sidecar records preset, master intensity, per-preset adjustments, camera model, app version, source timestamp, and that the Sony original was preserved but its path is unknown. Scanline, mask, and vignette texture are included in the saved derivative. JPEG, sidecar, thumbnail, settings, and index files use temporary files, flush/sync, and atomic rename; partial save failure removes the transaction's preceding files.
 
-After activity resume, Java makes three bounded attempts to open the exact external-storage path used by the working PMCADemo and WaveSnap applications. It creates the output tree, checks available space, and proves write/close/rename/read-back behavior before passing that root to native code. Unsupported legacy descriptor sync alone no longer disables a writable card; hard permission, read-only, I/O, and no-space failures still do. The logger uses the same verified root. Native diagnostics distinguish card readiness, directory creation, write verification, low-space, and index failures; Sony capture remains available when derivative storage is unavailable and the UI does not report a RetroLens save until the full transaction completes.
+After activity resume, Java resolves the absolute Environment path without touching the card and starts camera/analysis immediately. The existing bounded native photo worker independently creates the output tree, checks available space, and proves write/close/rename/read-back behavior before enabling derivatives. Card initialization therefore cannot hold the splash or filtered preview. While it runs the UI reports `RETRO STORAGE STARTING`; hard permission, read-only, I/O, index, and no-space failures disable only the derivative. The logger buffers normal startup messages and flushes after camera teardown instead of syncing the card on the UI thread. Native diagnostics distinguish initialization, readiness, directory, write-test, low-space, and index states; Sony capture remains available throughout.
 
 Full-resolution post-processing remains disabled until safe discovery of the newly captured Sony JPEG and a memory-bounded tile path are physically proven.
 
@@ -124,6 +125,7 @@ PicoJPEG reduced decode produces an 80x60 working image, chosen to fit the a5100
 
 - The earlier small-panel behavior is physically observed. The fullscreen candidate is a new uninstalled build and must not be described as device-proven until its locked-buffer dimensions and complete screen coverage are observed on-camera.
 - A frozen moving area with a working Sony preview indicates a decode/cadence issue. Fn opens rate-limited diagnostics.
+- If effects are delayed, the full splash must reduce to `EFFECTS STARTING` within 800 ms while Sony preview and shutter remain usable. A permanent full-screen splash is a startup-state regression.
 - If `Writing memory` persists after exit, stop testing this candidate and reinstall `releases/RetroLens-1.0.0-safe-preview.apk`; avoid battery removal while the card LED is active unless the camera is irrecoverably wedged.
 - If derivative saving fails, confirm free card space and inspect `RETROLENS/LOG.TXT`. A healthy startup records `Storage: status=1`, the canonical root, free bytes, and `PhotoRuntime: storage ready`. The Sony original should still exist independently.
 - Use `./scripts/toolchain-info.sh` for missing tools and `./scripts/usb-status.sh` for installation connectivity.

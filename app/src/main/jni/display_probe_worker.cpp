@@ -81,6 +81,7 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
                                        const char* cameraModel, const char* versionName,
                                        int storageStatus)
     : running_(false), threadStarted_(false), photoRunning_(false), photoThreadStarted_(false),
+      storageInitializationComplete_(false), initialStorageStatus_(storageStatus),
       intervalMs_(intervalMs), frameCount_(0), postCount_(0), surfaceWidth_(0), surfaceHeight_(0),
       surfaceFormat_(0), inputPending_(false), inputInUse_(false), hasPrevious_(false),
       hasRaw_(false), styleDirty_(false), selectedStyle_(0), intensity_(100), parameterIndex_(0),
@@ -110,19 +111,6 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
     memset(photoAdjustments_, 0, sizeof(photoAdjustments_));
     sequenceMetrics_ = calculateSequenceProbeMetrics(kSequenceOff, 0, 0, 0, 0, 0);
     memset(&filterMetrics_, 0, sizeof(filterMetrics_));
-    RuntimeSettings settings;
-    storageReady_ = photoStore_.initialize() == kPhotoStorageReady;
-    if (storageReady_ && photoStore_.loadSettings(&settings)) {
-        selectedStyle_ = settings.selectedPreset;
-        intensity_ = settings.intensity;
-        favoritesLo_ = settings.favoritesLo;
-        favoritesHi_ = settings.favoritesHi;
-        recentCount_ = settings.recentCount;
-        diagnostics_ = settings.diagnostics;
-        for (int i = 0; i < recentCount_; i++)
-            recent_[i] = settings.recent[i];
-        memcpy(adjustments_, settings.adjustments, sizeof(adjustments_));
-    }
     filterMetrics_.selectedPreset = selectedStyle_;
     filterMetrics_.intensity = intensity_;
     filterMetrics_.parameterIndex = parameterIndex_;
@@ -131,20 +119,10 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs, cons
     filterMetrics_.controlsVisible = controlsVisible_;
     filterMetrics_.diagnostics = diagnostics_;
     filterMetrics_.favorite = isFavoriteLocked(selectedStyle_);
-    filterMetrics_.photoStorageState = photoStore_.storageState();
-    if (!storageReady_) {
-        if (storageStatus == 3)
-            filterMetrics_.photoStorageState = kPhotoStorageDirectoryFailed;
-        else if (storageStatus == 4)
-            filterMetrics_.photoStorageState = kPhotoStorageWriteProbeFailed;
-        else if (storageStatus == 5)
-            filterMetrics_.photoStorageState = kPhotoStorageInsufficientSpace;
-    }
-    filterMetrics_.photoWriteStage = photoStore_.writeStage();
-    filterMetrics_.photoWriteError = photoStore_.lastError();
-    int64_t freeBytes = photoStore_.freeBytes();
-    filterMetrics_.photoFreeMiB = freeBytes < 0 ? -1 : (int)(freeBytes / (1024 * 1024));
-    galleryPhotoCount_ = photoStore_.photoCount();
+    filterMetrics_.photoStorageState = kPhotoStorageInitializing;
+    filterMetrics_.photoWriteStage = kPhotoStageNone;
+    filterMetrics_.photoWriteError = 0;
+    filterMetrics_.photoFreeMiB = -1;
     filterMetrics_.galleryPhotoCount = galleryPhotoCount_;
     memset(raw_, 0, sizeof(raw_));
     memset(filtered_, 0, sizeof(filtered_));
@@ -177,19 +155,21 @@ bool DisplayProbeWorker::start() {
         return false;
     }
     threadStarted_ = true;
-    if (storageReady_) {
+    pthread_mutex_lock(&photoMutex_);
+    photoRunning_ = true;
+    pthread_mutex_unlock(&photoMutex_);
+    if (pthread_create(&photoThread_, 0, photoThreadEntry, this) == 0) {
+        photoThreadStarted_ = true;
+    } else {
         pthread_mutex_lock(&photoMutex_);
-        photoRunning_ = true;
+        photoRunning_ = false;
         pthread_mutex_unlock(&photoMutex_);
-        if (pthread_create(&photoThread_, 0, photoThreadEntry, this) == 0) {
-            photoThreadStarted_ = true;
-        } else {
-            pthread_mutex_lock(&photoMutex_);
-            photoRunning_ = false;
-            pthread_mutex_unlock(&photoMutex_);
-            storageReady_ = false;
-            filterMetrics_.photoStorageState = kPhotoStorageDirectoryFailed;
-        }
+        pthread_mutex_lock(&mutex_);
+        storageInitializationComplete_ = true;
+        storageReady_ = false;
+        filterMetrics_.photoStorageState = kPhotoStorageDirectoryFailed;
+        pthread_cond_broadcast(&condition_);
+        pthread_mutex_unlock(&mutex_);
     }
     return true;
 }
@@ -520,6 +500,20 @@ bool DisplayProbeWorker::waitForProcessedFrame(int minimumFrame, int timeoutMs) 
     return reached;
 }
 
+bool DisplayProbeWorker::waitForStorageInitialization(int timeoutMs) {
+    struct timespec deadline;
+    deadlineFromNow(&deadline, timeoutMs);
+    pthread_mutex_lock(&mutex_);
+    while (running_ && !storageInitializationComplete_) {
+        int result = pthread_cond_timedwait(&condition_, &mutex_, &deadline);
+        if (result != 0)
+            break;
+    }
+    bool initialized = storageInitializationComplete_;
+    pthread_mutex_unlock(&mutex_);
+    return initialized;
+}
+
 bool DisplayProbeWorker::waitForPhotoResult(int minimumResults, int timeoutMs) {
     struct timespec deadline;
     deadlineFromNow(&deadline, timeoutMs);
@@ -561,6 +555,50 @@ void* DisplayProbeWorker::photoThreadEntry(void* context) {
 }
 
 void DisplayProbeWorker::photoRun() {
+    RuntimeSettings settings;
+    bool loadedSettings = false;
+    PhotoStorageState storageState = photoStore_.initialize();
+    if (storageState == kPhotoStorageReady)
+        loadedSettings = photoStore_.loadSettings(&settings);
+    if (storageState != kPhotoStorageReady) {
+        if (initialStorageStatus_ == 3)
+            storageState = kPhotoStorageDirectoryFailed;
+        else if (initialStorageStatus_ == 4)
+            storageState = kPhotoStorageWriteProbeFailed;
+        else if (initialStorageStatus_ == 5)
+            storageState = kPhotoStorageInsufficientSpace;
+    }
+
+    pthread_mutex_lock(&mutex_);
+    storageReady_ = storageState == kPhotoStorageReady;
+    storageInitializationComplete_ = true;
+    if (loadedSettings) {
+        selectedStyle_ = settings.selectedPreset;
+        intensity_ = settings.intensity;
+        favoritesLo_ = settings.favoritesLo;
+        favoritesHi_ = settings.favoritesHi;
+        recentCount_ = settings.recentCount;
+        diagnostics_ = settings.diagnostics;
+        for (int i = 0; i < recentCount_; i++)
+            recent_[i] = settings.recent[i];
+        memcpy(adjustments_, settings.adjustments, sizeof(adjustments_));
+        styleDirty_ = hasRaw_;
+    }
+    galleryPhotoCount_ = photoStore_.photoCount();
+    filterMetrics_.selectedPreset = selectedStyle_;
+    filterMetrics_.intensity = intensity_;
+    filterMetrics_.parameterValue = intensity_;
+    filterMetrics_.diagnostics = diagnostics_;
+    filterMetrics_.favorite = isFavoriteLocked(selectedStyle_);
+    filterMetrics_.galleryPhotoCount = galleryPhotoCount_;
+    filterMetrics_.photoStorageState = storageState;
+    filterMetrics_.photoWriteStage = photoStore_.writeStage();
+    filterMetrics_.photoWriteError = photoStore_.lastError();
+    int64_t availableBytes = photoStore_.freeBytes();
+    filterMetrics_.photoFreeMiB = availableBytes < 0 ? -1 : (int)(availableBytes / (1024 * 1024));
+    pthread_cond_broadcast(&condition_);
+    pthread_mutex_unlock(&mutex_);
+
     while (true) {
         pthread_mutex_lock(&photoMutex_);
         while (photoRunning_ && !photoPending_)

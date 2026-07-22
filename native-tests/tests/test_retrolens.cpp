@@ -422,6 +422,7 @@ static void testReducedDecodeAndBoundedWorker() {
     DisplayProbeWorker* photoWorker =
         new DisplayProbeWorker("host-photo-runtime", 8, photoRoot, "HOST", "test");
     assert(photoWorker->start());
+    assert(photoWorker->waitForStorageInitialization(1000));
     assert(photoWorker->submitJpeg(encoded, (int)size, 6000) == kFilterSubmitAccepted);
     assert(photoWorker->waitForProcessedFrame(1, 1000));
     assert(photoWorker->requestPhoto(6123) == kPhotoRequestQueued);
@@ -466,6 +467,7 @@ static void testReducedDecodeAndBoundedWorker() {
 
     DisplayProbeWorker unavailableWorker("host-storage-failure", 8, "", "HOST", "test", 4);
     assert(unavailableWorker.start());
+    assert(unavailableWorker.waitForStorageInitialization(1000));
     assert(unavailableWorker.submitJpeg(encoded, (int)size, 7000) == kFilterSubmitAccepted);
     assert(unavailableWorker.waitForProcessedFrame(1, 1000));
     assert(unavailableWorker.requestPhoto(7123) == kPhotoRequestUnavailable);

@@ -15,6 +15,10 @@ public class Logger {
           "External logging disabled: " + (storage == null ? "no storage result" : storage.detail));
   }
 
+  public static synchronized void configureRoot(String root) {
+    storageRoot = root == null || root.length() == 0 ? null : new File(root);
+  }
+
   public static File getFile() {
     return storageRoot == null ? null : new File(storageRoot, "RETROLENS/LOG.TXT");
   }
@@ -28,6 +32,7 @@ public class Logger {
         writer.append("\n");
         throwable.printStackTrace(new PrintWriter(writer));
         error(writer.toString());
+        flush();
         System.exit(0);
       }
     });
@@ -68,7 +73,6 @@ public class Logger {
   }
   public static void error(String msg) {
     log("ERROR", msg);
-    flush();
   }
 
   private static boolean appendToFile(String text) {

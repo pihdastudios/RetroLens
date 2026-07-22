@@ -116,6 +116,37 @@ PhotoStorageState PhotoStore::initialize() {
         storageState_ = kPhotoStorageInsufficientSpace;
         return storageState_;
     }
+    char probeTemporary[704];
+    char probeCompleted[704];
+    snprintf(probeTemporary, sizeof(probeTemporary), "%s/storage_probe.tmp", config_);
+    snprintf(probeCompleted, sizeof(probeCompleted), "%s/storage_probe.ok", config_);
+    unlink(probeTemporary);
+    unlink(probeCompleted);
+    FILE* probe = fopen(probeTemporary, "wb");
+    const char probeValue[] = "RETROLENS STORAGE OK\n";
+    bool probeWritten =
+        probe && fwrite(probeValue, 1, sizeof(probeValue) - 1, probe) == sizeof(probeValue) - 1;
+    if (probe && !flushAndClose(probe))
+        probeWritten = false;
+    if (!probeWritten || !atomicReplace(probeTemporary, probeCompleted) ||
+        !regularFileWithSize(probeCompleted, sizeof(probeValue) - 1)) {
+        lastError_ = errno;
+        unlink(probeTemporary);
+        unlink(probeCompleted);
+        storageState_ = kPhotoStorageWriteProbeFailed;
+        return storageState_;
+    }
+    probe = fopen(probeCompleted, "rb");
+    char firstByte = 0;
+    bool probeReadable = probe && fread(&firstByte, 1, 1, probe) == 1 && firstByte == 'R';
+    if (probe)
+        fclose(probe);
+    unlink(probeCompleted);
+    if (!probeReadable) {
+        lastError_ = errno;
+        storageState_ = kPhotoStorageWriteProbeFailed;
+        return storageState_;
+    }
     cleanTemporaryFiles(config_);
     cleanTemporaryFiles(photos_);
     cleanTemporaryFiles(thumbnails_);

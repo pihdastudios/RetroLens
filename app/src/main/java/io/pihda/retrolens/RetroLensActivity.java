@@ -2,8 +2,10 @@ package io.pihda.retrolens;
 
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import com.sony.scalar.hardware.CameraEx;
+import java.io.File;
 import java.nio.ByteBuffer;
 
 /** Photo-only RetroLens runtime with bounded analytical preview and derivative output. */
@@ -17,35 +19,26 @@ public final class RetroLensActivity extends BaseActivity
   private Handler mainHandler;
   private CameraEx readyCamera;
   private volatile boolean resumed;
-  private boolean displayProbeReady;
+  private boolean nativeRuntimeReady;
+  private boolean filteredSurfaceReady;
+  private boolean fatalCameraError;
   private boolean cameraQuarantined;
   private int receivedFrames;
   private int releasedFrames;
   private int lastJpegBytes;
   private long firstFrameTimestampMs;
   private long lastFrameTimestampMs;
-  private StorageController.Result storageResult;
-  private int storageAttempt;
-  private static final int MAX_STORAGE_ATTEMPTS = 3;
-  private final Runnable storageProbe = new Runnable() {
+  private static final long STARTUP_FALLBACK_MS = 800L;
+  private final Runnable startupFallback = new Runnable() {
     @Override
     public void run() {
-      if (!resumed || storageResult != null)
+      if (!resumed || filteredSurfaceReady || fatalCameraError)
         return;
-      storageAttempt++;
-      StorageController.Result result = StorageController.probe(NativeBridge.BUILD_ID);
-      Logger.info("Storage: attempt=" + storageAttempt + " status=" + result.status + " root="
-          + result.root + " freeBytes=" + result.freeBytes + " detail=" + result.detail);
-      if (result.isReady() || storageAttempt >= MAX_STORAGE_ATTEMPTS) {
-        storageResult = result;
-        Logger.configure(result);
-        Logger.flush();
-        displayProbeController.configureStorage(result);
-        startRuntimeIfReady();
-      } else {
-        long delayMs = storageAttempt == 1 ? 250L : 750L;
-        mainHandler.postDelayed(this, delayMs);
-      }
+      if (readyCamera == null)
+        statusView.showCompact("CAMERA STARTING", "SHUTTER AVAILABLE WHEN CAMERA IS READY");
+      else
+        statusView.showCompact("EFFECTS STARTING", "SONY PREVIEW AND SHUTTER ACTIVE");
+      Logger.info("RetroLens: startup overlay reduced after 800 ms");
     }
   };
 
@@ -73,15 +66,19 @@ public final class RetroLensActivity extends BaseActivity
       return;
     }
     resumed = true;
-    displayProbeReady = false;
+    nativeRuntimeReady = false;
+    filteredSurfaceReady = false;
+    fatalCameraError = false;
     readyCamera = null;
-    storageResult = null;
-    storageAttempt = 0;
     resetSequenceMetrics();
     setAutoPowerOffMode(false);
     statusView.showStarting();
+    File external = Environment.getExternalStorageDirectory();
+    String storageRoot = external == null ? "" : external.getAbsoluteFile().getAbsolutePath();
+    Logger.configureRoot(storageRoot);
+    displayProbeController.configureStorageRoot(storageRoot);
     cameraController.start();
-    mainHandler.post(storageProbe);
+    mainHandler.postDelayed(startupFallback, STARTUP_FALLBACK_MS);
     Logger.info("RetroLens: photo runtime resume complete");
   }
 
@@ -118,21 +115,35 @@ public final class RetroLensActivity extends BaseActivity
   }
 
   @Override
-  public void onDisplayProbeResult(int status) {
+  public void onNativeRuntimeReady() {
     if (!resumed)
       return;
-    if (status == NativeBridge.SURFACE_OK) {
-      displayProbeReady = true;
-      startSequenceIfReady();
-    } else {
-      statusView.showError("NATIVE PROBE FAILED  E" + status, "SONY PREVIEW REMAINS ACTIVE");
+    nativeRuntimeReady = true;
+    startSequenceIfReady();
+    Logger.info("RetroLens: native runtime ready behind Sony preview");
+  }
+
+  @Override
+  public void onFilteredSurfaceReady() {
+    if (resumed) {
+      filteredSurfaceReady = true;
+      mainHandler.removeCallbacks(startupFallback);
+      statusView.showReady();
+      Logger.info("RetroLens: filtered surface visible");
     }
   }
 
   @Override
-  public void onProcessedPreviewReady() {
-    if (resumed)
-      statusView.showReady();
+  public void onAnalyticalPreviewUnavailable(int status) {
+    if (!resumed)
+      return;
+    nativeRuntimeReady = false;
+    filteredSurfaceReady = false;
+    CameraSequenceFrameSource source = frameSource;
+    if (source != null)
+      source.requestSequenceStop();
+    statusView.showCompact("EFFECT PREVIEW UNAVAILABLE", "SONY PREVIEW AND CAPTURE REMAIN ACTIVE");
+    Logger.error("RetroLens: analytical preview unavailable status=" + status);
   }
 
   @Override
@@ -183,8 +194,10 @@ public final class RetroLensActivity extends BaseActivity
       public void run() {
         if (resumed) {
           displayProbeController.stop();
-          displayProbeReady = false;
-          statusView.showError("SEQUENCE UNAVAILABLE", "NORMAL CAPTURE REMAINS ACTIVE");
+          nativeRuntimeReady = false;
+          filteredSurfaceReady = false;
+          statusView.showCompact(
+              "EFFECT PREVIEW UNAVAILABLE", "SONY PREVIEW AND CAPTURE REMAIN ACTIVE");
         }
         Logger.error("RetroLens: sequence unavailable " + reason);
       }
@@ -193,8 +206,11 @@ public final class RetroLensActivity extends BaseActivity
 
   @Override
   public void onCameraUnavailable(String reason) {
-    if (resumed)
+    if (resumed) {
+      fatalCameraError = true;
+      mainHandler.removeCallbacks(startupFallback);
       statusView.showError("CAMERA UNAVAILABLE", "EXIT AND RESTART SAFELY");
+    }
     Logger.error("RetroLens: camera unavailable " + reason);
   }
 
@@ -372,7 +388,7 @@ public final class RetroLensActivity extends BaseActivity
   }
 
   private void startSequenceIfReady() {
-    if (!resumed || !displayProbeReady || readyCamera == null || frameSource != null)
+    if (!resumed || !nativeRuntimeReady || readyCamera == null || frameSource != null)
       return;
     resetSequenceMetrics();
     CameraSequenceFrameSource source = new CameraSequenceFrameSource(this, this);
@@ -381,12 +397,13 @@ public final class RetroLensActivity extends BaseActivity
     if (!source.start(readyCamera)) {
       frameSource = null;
       updateSequenceMetrics(NativeDisplayProbeController.SEQUENCE_ERROR);
-      statusView.showError("SEQUENCE START FAILED", "NORMAL CAPTURE REMAINS ACTIVE");
+      statusView.showCompact(
+          "EFFECT PREVIEW UNAVAILABLE", "SONY PREVIEW AND CAPTURE REMAIN ACTIVE");
     }
   }
 
   private void startRuntimeIfReady() {
-    if (!resumed || readyCamera == null || storageResult == null || displayProbeReady)
+    if (!resumed || readyCamera == null || nativeRuntimeReady)
       return;
     displayProbeController.start();
   }

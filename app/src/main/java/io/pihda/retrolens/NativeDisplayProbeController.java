@@ -22,8 +22,9 @@ public final class NativeDisplayProbeController
   private static final int MAX_EXPECTED_STOP_MS = 3000;
 
   public interface Listener {
-    void onDisplayProbeResult(int status);
-    void onProcessedPreviewReady();
+    void onNativeRuntimeReady();
+    void onFilteredSurfaceReady();
+    void onAnalyticalPreviewUnavailable(int status);
   }
 
   private final SurfaceView surfaceView;
@@ -42,12 +43,24 @@ public final class NativeDisplayProbeController
         scheduleNextFrame();
     }
   };
+  private final Runnable statsTick = new Runnable() {
+    @Override
+    public void run() {
+      statsScheduled = false;
+      if (!active || handle == 0L)
+        return;
+      pollStats();
+      if (active)
+        scheduleStats();
+    }
+  };
   private long handle;
   private boolean active;
   private boolean surfaceReady;
   private boolean tickScheduled;
+  private boolean statsScheduled;
   private boolean firstPostReported;
-  private boolean processedPreviewReported;
+  private boolean surfaceRevealRequested;
   private int reportedPhotoSaves;
   private int reportedPhotoFailures;
   private int reportedStorageState = -1;
@@ -58,13 +71,15 @@ public final class NativeDisplayProbeController
     holder = view.getHolder();
     holder.setFormat(PixelFormat.RGB_565);
     view.setZOrderMediaOverlay(true);
+    view.setVisibility(View.GONE);
   }
 
-  public synchronized void configureStorage(StorageController.Result storage) {
+  public synchronized void configureStorageRoot(String root) {
     if (handle != 0L)
       return;
-    storageRoot = storage != null && storage.isReady() ? storage.root : "";
-    storageStatus = storage == null ? StorageController.ROOT_UNAVAILABLE : storage.status;
+    storageRoot = root == null ? "" : root;
+    storageStatus =
+        storageRoot.length() == 0 ? StorageController.ROOT_UNAVAILABLE : StorageController.READY;
   }
 
   public synchronized void start() {
@@ -72,11 +87,11 @@ public final class NativeDisplayProbeController
       return;
     active = true;
     firstPostReported = false;
-    processedPreviewReported = false;
+    surfaceRevealRequested = false;
     reportedPhotoSaves = 0;
     reportedPhotoFailures = 0;
     reportedStorageState = -1;
-    surfaceView.setVisibility(View.VISIBLE);
+    surfaceView.setVisibility(View.GONE);
     surfaceView.setOnTouchListener(this);
     if (!NativeBridge.load()) {
       fail(NativeBridge.SURFACE_NO_WINDOW);
@@ -89,6 +104,8 @@ public final class NativeDisplayProbeController
       return;
     }
     holder.addCallback(this);
+    listener.onNativeRuntimeReady();
+    scheduleStats();
   }
 
   public synchronized void stop() {
@@ -96,7 +113,9 @@ public final class NativeDisplayProbeController
       return;
     active = false;
     handler.removeCallbacks(animationTick);
+    handler.removeCallbacks(statsTick);
     tickScheduled = false;
+    statsScheduled = false;
     holder.removeCallback(this);
     surfaceReady = false;
     surfaceView.setOnTouchListener(null);
@@ -194,23 +213,30 @@ public final class NativeDisplayProbeController
     if (!firstPostReported) {
       firstPostReported = true;
       Logger.info("PhotoRuntime: first synchronous post complete");
-      listener.onDisplayProbeResult(status);
+      listener.onFilteredSurfaceReady();
     }
+    pollStats();
+    return true;
+  }
+
+  private void pollStats() {
+    if (!active || handle == 0L)
+      return;
     NativeBridge.nativeGetDisplayProbeStats(handle, runtimeStats);
-    if (!processedPreviewReported && runtimeStats[6] > 0) {
-      processedPreviewReported = true;
-      listener.onProcessedPreviewReady();
+    if (!surfaceRevealRequested && runtimeStats[6] > 0) {
+      surfaceRevealRequested = true;
+      Logger.info("PhotoRuntime: first filtered frame ready; revealing native surface");
+      surfaceView.setVisibility(View.VISIBLE);
     }
     if (runtimeStats[6] == 0 && runtimeStats[7] >= 3) {
       Logger.error("PhotoRuntime: analytical decode failed repeatedly; showing Sony fallback");
       fail(NativeBridge.SURFACE_FORMAT_UNSUPPORTED);
-      return false;
+      return;
     }
     if (runtimeStats[1] != reportedPhotoSaves) {
       reportedPhotoSaves = runtimeStats[1];
       Logger.info("PhotoRuntime: processed derivative saved count=" + runtimeStats[1]
           + " bytes=" + runtimeStats[3] + " galleryCount=" + runtimeStats[5]);
-      Logger.flush();
     }
     if (runtimeStats[2] != reportedPhotoFailures) {
       reportedPhotoFailures = runtimeStats[2];
@@ -220,11 +246,12 @@ public final class NativeDisplayProbeController
       reportedStorageState = runtimeStats[8];
       if (runtimeStats[8] == 1)
         Logger.info("PhotoRuntime: storage ready freeMiB=" + runtimeStats[11]);
+      else if (runtimeStats[8] == 7)
+        Logger.info("PhotoRuntime: storage initialization running off UI thread");
       else
         Logger.error("PhotoRuntime: storage unavailable state=" + runtimeStats[8] + " stage="
             + runtimeStats[9] + " errno=" + runtimeStats[10] + " freeMiB=" + runtimeStats[11]);
     }
-    return true;
   }
 
   private void scheduleNextFrame() {
@@ -234,15 +261,24 @@ public final class NativeDisplayProbeController
     handler.postDelayed(animationTick, FRAME_INTERVAL_MS);
   }
 
+  private void scheduleStats() {
+    if (!active || statsScheduled)
+      return;
+    statsScheduled = true;
+    handler.postDelayed(statsTick, FRAME_INTERVAL_MS);
+  }
+
   private void fail(int status) {
     active = false;
     handler.removeCallbacks(animationTick);
+    handler.removeCallbacks(statsTick);
     tickScheduled = false;
+    statsScheduled = false;
     holder.removeCallback(this);
     surfaceReady = false;
     destroyNativeProbe();
     surfaceView.setVisibility(View.GONE);
-    listener.onDisplayProbeResult(status);
+    listener.onAnalyticalPreviewUnavailable(status);
   }
 
   private void destroyNativeProbe() {

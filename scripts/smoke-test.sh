@@ -51,8 +51,11 @@ grep -q 'NATIVE_OUTPUT_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'EXTERNAL_LOGGING_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/Logger.java"
-grep -q 'StorageController.probe' \
-    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+if grep -q 'StorageController.probe' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
+    echo "Storage probing must not block the activity startup path" >&2
+    exit 1
+fi
 grep -q 'renamed probe could not be read back' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StorageController.java"
 if grep -q 'getFD().sync()' \
@@ -62,10 +65,16 @@ if grep -q 'getFD().sync()' \
 fi
 grep -q 'storageRoot, storageStatus, Build.MODEL' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"
-grep -q 'MAX_STORAGE_ATTEMPTS = 3' \
+grep -q 'STARTUP_FALLBACK_MS = 800L' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
-grep -q 'if (mode == MODE_READY)' \
+grep -q 'setVisibility(GONE)' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/StartupStatusView.java"
+grep -q 'onNativeRuntimeReady' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'onFilteredSurfaceReady' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'first filtered frame ready; revealing native surface' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"
 grep -q 'kPhotoStorageIndexFailed' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
 grep -q 'controlsVisibleUntilMs_' "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
 grep -q 'cleanTemporaryFiles' "$PROJECT_DIR/app/src/main/jni/photo_store.cpp"
@@ -146,8 +155,8 @@ fi
 grep -q 'FRAME_INTERVAL_MS = 125' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java"
 if [[ $(grep -c 'new Runnable' \
-    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java") -ne 1 ]]; then
-    echo "Thread probe must use exactly one reusable Java cadence runnable" >&2
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeDisplayProbeController.java") -ne 2 ]]; then
+    echo "Photo runtime must use one display runnable and one hidden-runtime stats runnable" >&2
     exit 1
 fi
 if grep -Eq 'ANativeWindow|CameraSequence|fopen|mkdir' \
@@ -167,6 +176,13 @@ grep -q 'kFilterProbeStyleCount = kMaxPresets' \
 grep -q 'kPhotoWidth = 320' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
 grep -q 'kPhotoHeight = 240' "$PROJECT_DIR/app/src/main/jni/photo_store.h"
 grep -q 'savePhoto' "$PROJECT_DIR/app/src/main/jni/photo_store.cpp"
+grep -q 'waitForStorageInitialization' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp"
+if [[ $(grep -c 'photoStore_\.initialize()' \
+    "$PROJECT_DIR/app/src/main/jni/display_probe_worker.cpp") -ne 1 ]]; then
+    echo "Photo storage must initialize exactly once on the photo worker" >&2
+    exit 1
+fi
 grep -q 'WRITE_EXTERNAL_STORAGE' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
 if grep -q 'android.permission.INTERNET' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"; then
     echo "RetroLens must not request Internet permission" >&2
