@@ -1,8 +1,8 @@
 # RetroLens
 
-RetroLens is a retro-effects camera project for the Sony a5100 OpenMemories environment. Its effects engine remains implemented in native C++, while the current hardware-recovery build deliberately runs only Sony's normal preview and still-capture path.
+RetroLens is a retro-effects camera project for the Sony a5100 OpenMemories environment. Its effects engine remains implemented in native C++, while the current staged probe deliberately limits work to Sony normal preview, still capture, and analytical-frame acquisition metrics.
 
-The current `thread-probe-20260722-d` build keeps CameraSequence, the full native runtime, Retro Clip, processed derivatives, and external-card logging disabled. It adds one bounded 8 FPS offscreen native worker behind the proven small display probe. Surface lock/post remains synchronous on the Java UI thread.
+The current `sequence-probe-20260722-e` build enables CameraSequence only after the proven normal preview and native metrics panel are ready. It reuses one 256 KiB direct buffer, validates JPEG boundaries, releases every Sony `DeviceMemory` in `finally`, and sends only integer counters to native code. JPEG decoding, filtering, Retro Clip, processed derivatives, and all external-card writes remain disabled.
 
 The project never modifies firmware, calibration data, boot partitions, or Sony originals.
 
@@ -15,7 +15,8 @@ The project never modifies firmware, calibration data, boot partitions, or Sony 
 - Safety APK SHA-256 `c71655c7f71dff4c107954fc09c1478494f3cc61fd2528b79c74b0015cc14b63` passed both physical lifecycle phases: five capture-free open/exit cycles followed by normal-camera captures, then capture inside RetroLens followed by a normal-camera capture. Six corresponding Sony originals were confirmed.
 - The proven recovery APK is preserved as `releases/RetroLens-1.0.0-safe-preview.apk`.
 - Static native display probe APK SHA-256 `cb7b6cd9658395e6e1d5c7ea98d1225a7a1cdb16e92762bce4ea3c49be99d87f` displayed its pattern successfully and passed both lifecycle phases by user report. `DSC05032.JPG` is the only new file independently visible from that session, so the findings retain that evidence boundary.
-- Thread-probe APK SHA-256 `9bdaddbcea606cf74c0b14b7f4b5aa966a733f2f0f48f9ea9366a578649fc4bb` passes ASan/UBSan, ThreadSanitizer, API-10 build, and APK verification. Physical validation remains pending.
+- Thread-probe APK SHA-256 `9bdaddbcea606cf74c0b14b7f4b5aa966a733f2f0f48f9ea9366a578649fc4bb` passes ASan/UBSan, ThreadSanitizer, API-10 build, and APK verification. The user confirmed its 8 FPS panel advanced from frame 10 to frame 26 with the rest of the camera behavior working; `DSC05033.JPG` independently confirms a new Sony original from that session.
+- Sequence-probe APK SHA-256 `000bc1d559b99c32768b598df19a469d4217ff76b5fdbdc03d6764e7ac8d3802` passes host tests, the legacy native and Java/API-10 builds, APK verification, and installation on the ILCE-5100. Physical launch/lifecycle results remain pending and must not be inferred from the earlier CameraSequence baseline.
 - No screenshots have yet been captured from the physical camera.
 
 See `DEVICE_FINDINGS.md` for the exact evidence boundary.
@@ -23,14 +24,13 @@ See `DEVICE_FINDINGS.md` for the exact evidence boundary.
 ## Architecture
 
 ```text
-CameraEx -> one Sony-owned normal preview SurfaceView
-         -> autofocus and still capture
-native worker -> one fixed 256x144 RGB565 raster at 8 FPS
-Java cadence  -> synchronous native display post every 125 ms
-Java View -> probe status and physical-key feedback
+CameraEx -> one Sony-owned normal preview SurfaceView -> autofocus/still capture
+         -> CameraSequence worker -> one direct JPEG buffer -> marker/size metrics only
+native worker -> one fixed 256x144 RGB565 metrics raster at 8 FPS
+Java cadence -> synchronous native display post every 125 ms
 ```
 
-Java owns the camera, one reusable cadence runnable, and surface posting. The native worker owns one fixed raster plus a mutex/condition and never touches a surface, camera API, file, or JNI reference. Pause removes the cadence callback, signals and joins the worker, reports its frame/post/join metrics, then releases `CameraEx`.
+Java owns the camera, the single analytical polling worker, one reusable direct buffer, one reusable cadence runnable, and surface posting. The native worker owns one fixed raster plus a mutex/condition and never touches a camera API or file. Pause first stops and joins analytical polling, then joins the display worker, and only then releases `CameraEx`. If analytical polling cannot be stopped after the bounded recovery attempt, `CameraEx` is deliberately quarantined instead of being released underneath a live Sony call.
 
 ## Toolchain
 
@@ -70,14 +70,14 @@ Installation requires the camera in a Sony-PMCA-RE compatible USB mode. `./scrip
 | Navigation controls | Reserved while effects are disabled |
 | Half shutter | Sony autofocus |
 | Full shutter | Sony original capture |
-| Movie | Show `VIDEO DISABLED - SAFETY BUILD` |
+| Movie | Show `VIDEO DISABLED - ACQUISITION PROBE` |
 | Delete | Back/exit |
 
-Effects touch gestures and touch-to-focus are disabled in the safety baseline.
+Effects touch gestures and touch-to-focus are disabled in the acquisition probe.
 
 ## Interface
 
-The interface keeps the Sony preview full-screen, adds a transparent Java status overlay, and places a 256×144 native diagnostic panel at the right center. The panel shows color bars, `NATIVE DISPLAY OK`, actual surface geometry/format, build ID, `THREAD 8 FPS`, a rolling frame number, and an animated sweep.
+The interface keeps the Sony preview full-screen, adds a transparent Java status overlay, and places a 256×144 native diagnostic panel at the right center. The panel shows native-thread cadence, sequence state, received/released/outstanding buffer counts, analytical FPS, last JPEG size, build ID, and an animated sweep. `OUT` must remain 0 between frames or briefly reach 1 while the current Sony buffer is being consumed.
 
 The UI exposes descriptive controls. Internally each preset has a stable ID, category, description, tier, control mask, tuned grade, and a graph assembled from bounded shared passes.
 
@@ -115,7 +115,7 @@ This is explicitly a preview-resolution derivative. Full-resolution post-process
 
 ### Retro Clip
 
-Retro Clip is runtime-disabled in `thread-probe-20260722-d`. Its bounded MJPEG/AVI implementation remains compiled and host-tested, but the full native runtime is not created and the movie key cannot start an output file.
+Retro Clip is runtime-disabled in `sequence-probe-20260722-e`. Its bounded MJPEG/AVI implementation remains compiled and host-tested, but the full native runtime is not created and the movie key cannot start an output file.
 
 Files are written to `.tmp`, finalized with `idx1`, patched, flushed, and atomically renamed. Activity interruption produces a finalized filename ending in `.incomplete` and an `interrupted: true` sidecar rather than pretending the clip is complete.
 
@@ -133,7 +133,7 @@ RetroLens makes no full-HD baked-filter, H.264, audio, or encoder/ISP intercepti
 
 ## Performance and memory
 
-The thread-probe build performs no analytical JPEG decoding, filter processing, recording, or app-owned card I/O. Its offscreen worker updates about 36,864 RGB565 pixels at 8 FPS, while the UI thread performs the already-proven bounded surface post.
+The sequence-probe build performs no analytical JPEG decoding, filter processing, recording, or app-owned card I/O. It polls at a nominal 90 ms interval with at most one Sony frame requested, copies into one reusable direct buffer for marker validation, and immediately releases the Sony buffer. Its offscreen worker updates about 36,864 RGB565 metric pixels at 8 FPS.
 
 The performance controller monitors decode, filter, render, and dropped-frame measurements and controls accepted cadence. The renderer sleeps between new frames and UI animation deadlines. SIMD, handwritten assembly, OpenGL ES, and larger JPEG libraries remain deferred until device measurements prove the optimized integer path insufficient and confirm CPU capabilities.
 
@@ -160,10 +160,10 @@ Settings are versioned and atomically replaced. Invalid values fall back to safe
 - `Writing memory` persisting after exit: do not launch RetroLens again. Allow a normal power-off if possible and avoid removing the battery while the card LED is active unless the camera is irrecoverably wedged.
 - Build cannot find tools: run `./scripts/toolchain-info.sh`; this project expects the workspace `toolchain/` directory and JDK 8.
 - Install cannot find camera: set USB Connection to Mass Storage or leave it in app-install mode and run `./scripts/usb-status.sh`.
-- The thread-probe build deliberately produces no `RETROLENS/LOG.TXT`; validation uses its visible frame counter/sweep and observed capture/exit behavior.
+- The sequence-probe build deliberately produces no `RETROLENS/LOG.TXT`; validation uses its visible counters and observed capture/exit behavior. `RX - REL` outside 0–1 is rendered as `BUFFER IMBALANCE`.
 
 ## Dependencies, licenses, and unresolved questions
 
 See `LICENSES.md` and `ATTRIBUTION.md`. The app does not vendor OpenCV, FFmpeg, RetroArch, or shader collections and does not request Internet access.
 
-Unresolved device questions include current native-surface compatibility, exact format-256 semantics, full-resolution capture discovery, safe alternative preview modes, Sony movie output selection, thermal/storage observability, and MJPEG throughput. These remain unclaimed until physical logs answer them.
+Unresolved device questions include whether this isolated CameraSequence lifecycle remains stable across repeated exits and still captures, exact format-256 semantics beyond observed JPEG markers, full-resolution capture discovery, Sony movie output selection, thermal/storage observability, and MJPEG throughput. These remain unclaimed until physical testing answers them.

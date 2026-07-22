@@ -8,6 +8,11 @@ import android.view.View;
 
 /** Owns the synchronous, storage-free native display probe. */
 public final class NativeDisplayProbeController implements SurfaceHolder.Callback {
+  public static final int SEQUENCE_OFF = 0;
+  public static final int SEQUENCE_STARTING = 1;
+  public static final int SEQUENCE_ACTIVE = 2;
+  public static final int SEQUENCE_ERROR = 3;
+  public static final int SEQUENCE_STOPPING = 4;
   private static final int FRAME_INTERVAL_MS = 125;
   private static final int MAX_EXPECTED_STOP_MS = 250;
 
@@ -42,7 +47,7 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
     view.setZOrderMediaOverlay(true);
   }
 
-  public void start() {
+  public synchronized void start() {
     if (active)
       return;
     active = true;
@@ -60,7 +65,7 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
     holder.addCallback(this);
   }
 
-  public void stop() {
+  public synchronized void stop() {
     if (!active && handle == 0L)
       return;
     active = false;
@@ -70,6 +75,15 @@ public final class NativeDisplayProbeController implements SurfaceHolder.Callbac
     surfaceReady = false;
     destroyNativeProbe();
     Logger.info("DisplayProbe: stopped");
+  }
+
+  public synchronized void updateSequenceMetrics(int state, int receivedFrames, int releasedFrames,
+      int lastJpegBytes, long firstTimestampMs, long lastTimestampMs) {
+    long probe = handle;
+    if (probe == 0L)
+      return;
+    NativeBridge.nativeUpdateDisplayProbeSequence(probe, state, receivedFrames, releasedFrames,
+        lastJpegBytes, firstTimestampMs, lastTimestampMs);
   }
 
   @Override

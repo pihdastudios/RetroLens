@@ -142,10 +142,11 @@ static unsigned long checksum16(const uint16_t* pixels, int count) {
 }
 
 static void testDisplayProbeRaster() {
+    SequenceProbeMetrics starting = calculateSequenceProbeMetrics(kSequenceStarting, 0, 0, 0, 0, 0);
     uint16_t guarded[2 + 13 * 9 + 2];
     for (int index = 0; index < (int)(sizeof(guarded) / sizeof(guarded[0])); index++)
         guarded[index] = 0x55aa;
-    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4, 7));
+    assert(renderDisplayProbe(guarded + 2, 13, 9, "probe-test", 17, 11, 4, 7, starting));
     assert(guarded[0] == 0x55aa && guarded[1] == 0x55aa);
     assert(guarded[2 + 13 * 9] == 0x55aa && guarded[2 + 13 * 9 + 1] == 0x55aa);
     assert(checksum16(guarded + 2, 13 * 9) != 0);
@@ -153,18 +154,32 @@ static void testDisplayProbeRaster() {
     uint16_t first[kDisplayProbeWidth * kDisplayProbeHeight];
     uint16_t second[kDisplayProbeWidth * kDisplayProbeHeight];
     assert(renderDisplayProbe(first, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 11));
+                              256, 144, 4, 11, starting));
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 11));
+                              256, 144, 4, 11, starting));
     assert(!memcmp(first, second, sizeof(first)));
     assert(checksum16(first, kDisplayProbeWidth * kDisplayProbeHeight) != 0);
     assert(first[0] == probeRgb565(66, 232, 188));
-    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4, 0));
-    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4, 0));
+    assert(!renderDisplayProbe(0, 1, 1, "invalid", 1, 1, 4, 0, starting));
+    assert(!renderDisplayProbe(first, 0, 1, "invalid", 1, 1, 4, 0, starting));
 
     assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "native-probe-test",
-                              256, 144, 4, 12));
+                              256, 144, 4, 12, starting));
     assert(memcmp(first, second, sizeof(first)) != 0);
+
+    SequenceProbeMetrics active =
+        calculateSequenceProbeMetrics(kSequenceActive, 10, 9, 65536, 1000, 2000);
+    assert(active.state == kSequenceActive);
+    assert(active.receivedFrames == 10 && active.releasedFrames == 9);
+    assert(active.lastJpegBytes == 65536 && active.fpsTenths == 90);
+    assert(renderDisplayProbe(second, kDisplayProbeWidth, kDisplayProbeHeight, "sequence-probe",
+                              256, 144, 4, 11, active));
+    assert(memcmp(first, second, sizeof(first)) != 0);
+
+    SequenceProbeMetrics malformed = calculateSequenceProbeMetrics(99, -1, -2, 999999, 2000, 1000);
+    assert(malformed.state == kSequenceError);
+    assert(malformed.receivedFrames == 0 && malformed.releasedFrames == 0);
+    assert(malformed.lastJpegBytes == 256 * 1024 && malformed.fpsTenths == 0);
 }
 
 static void testDisplayProbeWorkerLifecycle() {
@@ -174,6 +189,8 @@ static void testDisplayProbeWorkerLifecycle() {
         assert(worker.start());
         assert(worker.waitForFrame(3, 250));
         worker.updateSurfaceInfo(17, 11, 4);
+        worker.updateSequenceMetrics(kSequenceActive, cycle + 1, cycle + 1, 60000, 1000,
+                                     1000 + cycle * 100);
 
         uint16_t destination[17 * 11 + 2];
         for (int index = 0; index < 17 * 11 + 2; index++)

@@ -1,17 +1,13 @@
 package io.pihda.retrolens;
 
-import android.os.Environment;
 import android.os.SystemClock;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.hardware.CameraSequence;
 import com.sony.scalar.hardware.DeviceBuffer;
 import com.sony.scalar.hardware.DeviceMemory;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 
 /**
  * Owns the low-rate Sony CameraSequence polling worker.
@@ -24,6 +20,7 @@ public final class CameraSequenceFrameSource {
   public interface Listener {
     void onSequenceStarted(CameraSequenceFrameSource source);
     void onFirstFrame(CameraSequenceFrameSource source, String format, int length);
+    void onFrameReleased(CameraSequenceFrameSource source, int releasedFrames);
     void onSequenceUnavailable(CameraSequenceFrameSource source, String reason);
   }
 
@@ -40,7 +37,6 @@ public final class CameraSequenceFrameSource {
   private static final long POLL_INTERVAL_MS = 90;
   private static final long FIRST_FRAME_TIMEOUT_MS = 5000;
   private static final long STATS_INTERVAL_MS = 5000;
-  private static final boolean DUMP_FIRST_JPEG = false;
 
   private final Object sequenceLock = new Object();
   private final Listener listener;
@@ -217,7 +213,7 @@ public final class CameraSequenceFrameSource {
     int statsFrames = 0;
     int totalFrames = 0;
     boolean firstFrameReported = false;
-    boolean diagnosticDumped = false;
+    int releasedFrames = 0;
 
     while (!stopping) {
       long nowMs = SystemClock.elapsedRealtime();
@@ -268,8 +264,12 @@ public final class CameraSequenceFrameSource {
           }
 
           int jpegLength = findJpegLength(reusableBuffer, frameSize);
-          boolean jpeg = jpegLength > 0;
-          int payloadLength = jpeg ? jpegLength : frameSize;
+          if (jpegLength <= 0) {
+            throw new IllegalStateException(
+                "analytical frame is not a bounded JPEG frameSize=" + frameSize);
+          }
+          boolean jpeg = true;
+          int payloadLength = jpegLength;
           long timestampMs = SystemClock.elapsedRealtime();
 
           totalFrames++;
@@ -289,11 +289,6 @@ public final class CameraSequenceFrameSource {
             if (listener != null) {
               listener.onFirstFrame(this, format, payloadLength);
             }
-          }
-
-          if (DUMP_FIRST_JPEG && jpeg && !diagnosticDumped) {
-            diagnosticDumped = true;
-            dumpDiagnosticJpeg(reusableBuffer, payloadLength);
           }
 
           if (consumer != null) {
@@ -318,6 +313,10 @@ public final class CameraSequenceFrameSource {
           if (memory != null) {
             try {
               memory.release();
+              releasedFrames++;
+              if (listener != null) {
+                listener.onFrameReleased(this, releasedFrames);
+              }
             } catch (Throwable throwable) {
               logFailure("release DeviceMemory", throwable);
             }
@@ -337,42 +336,6 @@ public final class CameraSequenceFrameSource {
       }
     }
     return -1;
-  }
-
-  private void dumpDiagnosticJpeg(ByteBuffer buffer, int length) {
-    File outputFile =
-        new File(Environment.getExternalStorageDirectory(), "RETROLENS/ANALYTICAL_PREVIEW_1.JPG");
-    FileOutputStream outputStream = null;
-    FileChannel channel = null;
-    try {
-      outputFile.getParentFile().mkdirs();
-      outputStream = new FileOutputStream(outputFile, false);
-      channel = outputStream.getChannel();
-      buffer.position(0);
-      buffer.limit(length);
-      while (buffer.hasRemaining()) {
-        channel.write(buffer);
-      }
-      Logger.info("RetroFrames: diagnostic JPEG saved path=" + outputFile.getAbsolutePath()
-          + " bytes=" + length);
-    } catch (Throwable throwable) {
-      logFailure("save diagnostic JPEG", throwable);
-    } finally {
-      if (channel != null) {
-        try {
-          channel.close();
-        } catch (Throwable throwable) {
-          logFailure("close diagnostic JPEG channel", throwable);
-        }
-      } else if (outputStream != null) {
-        try {
-          outputStream.close();
-        } catch (Throwable throwable) {
-          logFailure("close diagnostic JPEG stream", throwable);
-        }
-      }
-      buffer.clear();
-    }
   }
 
   private void unavailable(String reason, Throwable throwable) {

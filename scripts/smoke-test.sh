@@ -41,7 +41,7 @@ grep -q 'DISPLAY_PROBE_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'DISPLAY_PROBE_THREAD_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
-grep -q 'ANALYTICAL_PREVIEW_ENABLED = false' \
+grep -q 'ANALYTICAL_PREVIEW_ENABLED = true' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
 grep -q 'NATIVE_OUTPUT_ENABLED = false' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/NativeBridge.java"
@@ -54,9 +54,29 @@ if grep -q 'retroLensSurface' "$PROJECT_DIR/app/src/main/res/layout/activity_ret
     echo "Display probe must not restore the full native output surface" >&2
     exit 1
 fi
-if grep -q 'new CameraSequenceFrameSource' \
+grep -q 'new CameraSequenceFrameSource' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"
+grep -q 'ByteBuffer.allocateDirect(MAX_JPEG_SIZE)' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/CameraSequenceFrameSource.java"
+if [[ $(grep -c 'ByteBuffer.allocateDirect' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/CameraSequenceFrameSource.java") -ne 1 ]]; then
+    echo "Sequence probe must allocate exactly one reusable direct buffer" >&2
+    exit 1
+fi
+grep -q 'getPreviewSequenceFrames(1)' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/CameraSequenceFrameSource.java"
+grep -q 'finally {' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/CameraSequenceFrameSource.java"
+grep -q 'memory.release()' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/CameraSequenceFrameSource.java"
+if grep -Eq 'Environment|FileOutputStream|FileChannel|getExternalStorageDirectory' \
+    "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/CameraSequenceFrameSource.java"; then
+    echo "Acquisition probe must not contain an external-storage frame dump path" >&2
+    exit 1
+fi
+if grep -Eq 'nativeSubmitFrame|nativeCreate\(' \
     "$PROJECT_DIR/app/src/main/java/io/pihda/retrolens/RetroLensActivity.java"; then
-    echo "Safe baseline must not start CameraSequence" >&2
+    echo "Acquisition probe must not submit or decode compressed frames" >&2
     exit 1
 fi
 if grep -q 'NativeBridge.load' \

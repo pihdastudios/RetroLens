@@ -5,11 +5,11 @@ import java.nio.ByteBuffer;
 
 /** Narrow JNI boundary. Pixels, UI, persistence, and recording remain native. */
 public final class NativeBridge {
-  public static final String BUILD_ID = "thread-probe-20260722-d";
+  public static final String BUILD_ID = "sequence-probe-20260722-e";
   public static final boolean SAFE_BASELINE_ENABLED = false;
   public static final boolean DISPLAY_PROBE_ENABLED = true;
   public static final boolean DISPLAY_PROBE_THREAD_ENABLED = true;
-  public static final boolean ANALYTICAL_PREVIEW_ENABLED = false;
+  public static final boolean ANALYTICAL_PREVIEW_ENABLED = true;
   public static final boolean NATIVE_OUTPUT_ENABLED = false;
   public static final boolean RETRO_CLIP_ENABLED = false;
   public static final boolean PROCESSED_DERIVATIVE_ENABLED = false;
@@ -68,6 +68,9 @@ public final class NativeBridge {
 
   public static native long nativeCreateDisplayProbe(String buildId, int intervalMs);
   public static native int nativePostDisplayProbe(long handle, Surface surface);
+  public static native void nativeUpdateDisplayProbeSequence(long handle, int state,
+      int receivedFrames, int releasedFrames, int lastJpegBytes, long firstTimestampMs,
+      long lastTimestampMs);
   public static native void nativeClearDisplayProbe(long handle);
   public static native int nativeDestroyDisplayProbe(long handle, int[] stats);
 }

@@ -89,8 +89,29 @@ uint16_t probeRgb565(int red, int green, int blue) {
     return (uint16_t)(((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3));
 }
 
+SequenceProbeMetrics calculateSequenceProbeMetrics(int state, int receivedFrames,
+                                                   int releasedFrames, int lastJpegBytes,
+                                                   int64_t firstTimestampMs,
+                                                   int64_t lastTimestampMs) {
+    SequenceProbeMetrics result;
+    result.state = state >= kSequenceOff && state <= kSequenceStopping ? state : kSequenceError;
+    result.receivedFrames = receivedFrames < 0 ? 0 : receivedFrames;
+    result.releasedFrames = releasedFrames < 0 ? 0 : releasedFrames;
+    result.lastJpegBytes = lastJpegBytes < 0 ? 0 : lastJpegBytes;
+    if (result.lastJpegBytes > 256 * 1024)
+        result.lastJpegBytes = 256 * 1024;
+    result.fpsTenths = 0;
+    if (result.receivedFrames > 1 && firstTimestampMs > 0 && lastTimestampMs > firstTimestampMs) {
+        int64_t elapsedMs = lastTimestampMs - firstTimestampMs;
+        int64_t fpsTenths = ((int64_t)result.receivedFrames - 1) * 10000 / elapsedMs;
+        result.fpsTenths = fpsTenths > 999 ? 999 : (int)fpsTenths;
+    }
+    return result;
+}
+
 bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* buildId,
-                        int surfaceWidth, int surfaceHeight, int surfaceFormat, int frameNumber) {
+                        int surfaceWidth, int surfaceHeight, int surfaceFormat, int frameNumber,
+                        const SequenceProbeMetrics& sequence) {
     if (!pixels || width <= 0 || height <= 0)
         return false;
 
@@ -106,21 +127,41 @@ bool renderDisplayProbe(uint16_t* pixels, int width, int height, const char* bui
     int barRight = width - 9;
     int barWidth = barRight > barLeft ? (barRight - barLeft) / 6 : 0;
     for (int index = 0; index < 6; index++)
-        rectangle(pixels, width, height, barLeft + index * barWidth, 9,
-                  index == 5 ? barRight : barLeft + (index + 1) * barWidth, 36, bars[index]);
+        rectangle(pixels, width, height, barLeft + index * barWidth, 7,
+                  index == 5 ? barRight : barLeft + (index + 1) * barWidth, 25, bars[index]);
 
-    text(pixels, width, height, 10, 49, "NATIVE DISPLAY OK", accent);
-    char geometry[64];
-    snprintf(geometry, sizeof(geometry), "SURFACE %dX%d FMT %d", surfaceWidth, surfaceHeight,
-             surfaceFormat);
-    text(pixels, width, height, 10, 70, geometry, warm);
-    text(pixels, width, height, 10, 91, buildId ? buildId : "UNKNOWN BUILD", warm);
     char threadStatus[64];
-    snprintf(threadStatus, sizeof(threadStatus), "THREAD 8 FPS FRAME %d", frameNumber);
-    text(pixels, width, height, 10, 112, threadStatus, accent);
+    snprintf(threadStatus, sizeof(threadStatus), "NATIVE THREAD 8 FPS F%d", frameNumber);
+    text(pixels, width, height, 10, 34, threadStatus, accent);
+    const char* state = "SEQUENCE OFF";
+    if (sequence.state == kSequenceStarting)
+        state = "SEQUENCE STARTING";
+    else if (sequence.state == kSequenceActive)
+        state = "SEQUENCE ACTIVE";
+    else if (sequence.state == kSequenceError)
+        state = "SEQUENCE ERROR";
+    else if (sequence.state == kSequenceStopping)
+        state = "SEQUENCE STOPPING";
+    int outstanding = sequence.receivedFrames - sequence.releasedFrames;
+    bool imbalance = outstanding < 0 || outstanding > 1;
+    text(pixels, width, height, 10, 53, imbalance ? "BUFFER IMBALANCE" : state,
+         imbalance || sequence.state == kSequenceError ? probeRgb565(255, 150, 110) : warm);
+    char balance[64];
+    snprintf(balance, sizeof(balance), "RX %d REL %d OUT %d", sequence.receivedFrames,
+             sequence.releasedFrames, outstanding);
+    text(pixels, width, height, 10, 72, balance, warm);
+    char analytical[64];
+    snprintf(analytical, sizeof(analytical), "FPS %d.%d JPEG %dK", sequence.fpsTenths / 10,
+             sequence.fpsTenths % 10, (sequence.lastJpegBytes + 1023) / 1024);
+    text(pixels, width, height, 10, 91, analytical, accent);
+    text(pixels, width, height, 10, 110, buildId ? buildId : "UNKNOWN BUILD", warm);
     int sweepWidth = width > 20 ? width - 20 : 1;
     int sweep = 10 + (int)(((unsigned int)frameNumber * 7U) % (unsigned int)sweepWidth);
-    rectangle(pixels, width, height, sweep, 128, sweep + 2, height - 4, warm);
+    rectangle(pixels, width, height, sweep, 124, sweep + 2, height - 4, warm);
+
+    (void)surfaceWidth;
+    (void)surfaceHeight;
+    (void)surfaceFormat;
 
     rectangle(pixels, width, height, 0, 0, width, 2, accent);
     rectangle(pixels, width, height, 0, height - 2, width, height, accent);

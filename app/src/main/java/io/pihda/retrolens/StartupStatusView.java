@@ -25,7 +25,7 @@ public final class StartupStatusView extends View {
   };
   private int mode = MODE_STARTING;
   private String title = "RETROLENS";
-  private String detail = "STARTING NATIVE THREAD PROBE";
+  private String detail = "STARTING SEQUENCE PROBE";
 
   public StartupStatusView(Context context, AttributeSet attributes) {
     super(context, attributes);
@@ -38,7 +38,7 @@ public final class StartupStatusView extends View {
     removeCallbacks(restoreReady);
     mode = MODE_STARTING;
     title = "RETROLENS";
-    detail = "STARTING NATIVE THREAD PROBE";
+    detail = "STARTING SEQUENCE PROBE";
     invalidate();
   }
 
@@ -78,14 +78,15 @@ public final class StartupStatusView extends View {
     canvas.drawText("RETROLENS", 20, 27, paint);
     paint.setTextSize(13.0f);
     paint.setColor(Color.rgb(66, 232, 188));
-    canvas.drawText("THREAD PROBE", width - 140, 26, paint);
+    canvas.drawText("SEQUENCE PROBE", width - 160, 26, paint);
 
     if (mode == MODE_READY) {
       paint.setColor(Color.argb(155, 13, 17, 18));
       canvas.drawRect(0, height - 34, width, height, paint);
       paint.setTextSize(12.0f);
       paint.setColor(Color.rgb(220, 216, 200));
-      canvas.drawText("PHOTO ONLY  /  ANALYSIS AND VIDEO DISABLED", 20, height - 12, paint);
+      canvas.drawText(
+          "PHOTO ONLY  /  ACQUISITION METRICS  /  VIDEO DISABLED", 20, height - 12, paint);
       return;
     }
 

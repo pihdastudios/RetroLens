@@ -15,6 +15,8 @@ class DisplayProbeWorker {
     bool start();
     int stop();
     void updateSurfaceInfo(int width, int height, int format);
+    void updateSequenceMetrics(int state, int receivedFrames, int releasedFrames, int lastJpegBytes,
+                               int64_t firstTimestampMs, int64_t lastTimestampMs);
     bool blitLatest(void* destination, int width, int height, int stride, int format,
                     int* frameNumber);
     bool waitForFrame(int minimumFrame, int timeoutMs);
@@ -36,6 +38,7 @@ class DisplayProbeWorker {
     int surfaceWidth_;
     int surfaceHeight_;
     int surfaceFormat_;
+    SequenceProbeMetrics sequenceMetrics_;
     char buildId_[48];
     uint16_t pixels_[kDisplayProbeWidth * kDisplayProbeHeight];
 };

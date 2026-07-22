@@ -37,7 +37,9 @@ DisplayProbeWorker::DisplayProbeWorker(const char* buildId, int intervalMs)
     buildId_[sizeof(buildId_) - 1] = 0;
     pthread_mutex_init(&mutex_, 0);
     pthread_cond_init(&condition_, 0);
-    renderDisplayProbe(pixels_, kDisplayProbeWidth, kDisplayProbeHeight, buildId_, 0, 0, 0, 0);
+    sequenceMetrics_ = calculateSequenceProbeMetrics(kSequenceOff, 0, 0, 0, 0, 0);
+    renderDisplayProbe(pixels_, kDisplayProbeWidth, kDisplayProbeHeight, buildId_, 0, 0, 0, 0,
+                       sequenceMetrics_);
 }
 
 DisplayProbeWorker::~DisplayProbeWorker() {
@@ -85,6 +87,16 @@ void DisplayProbeWorker::updateSurfaceInfo(int width, int height, int format) {
         surfaceFormat_ = format;
         pthread_cond_broadcast(&condition_);
     }
+    pthread_mutex_unlock(&mutex_);
+}
+
+void DisplayProbeWorker::updateSequenceMetrics(int state, int receivedFrames, int releasedFrames,
+                                               int lastJpegBytes, int64_t firstTimestampMs,
+                                               int64_t lastTimestampMs) {
+    pthread_mutex_lock(&mutex_);
+    sequenceMetrics_ = calculateSequenceProbeMetrics(
+        state, receivedFrames, releasedFrames, lastJpegBytes, firstTimestampMs, lastTimestampMs);
+    pthread_cond_broadcast(&condition_);
     pthread_mutex_unlock(&mutex_);
 }
 
@@ -148,7 +160,7 @@ void DisplayProbeWorker::renderNextLocked() {
     else
         frameCount_++;
     renderDisplayProbe(pixels_, kDisplayProbeWidth, kDisplayProbeHeight, buildId_, surfaceWidth_,
-                       surfaceHeight_, surfaceFormat_, frameCount_);
+                       surfaceHeight_, surfaceFormat_, frameCount_, sequenceMetrics_);
 }
 
 } // namespace retrolens

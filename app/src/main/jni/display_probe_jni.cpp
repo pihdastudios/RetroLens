@@ -86,6 +86,17 @@ extern "C" JNIEXPORT jint JNICALL Java_io_pihda_retrolens_NativeBridge_nativePos
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_io_pihda_retrolens_NativeBridge_nativeUpdateDisplayProbeSequence(
+    JNIEnv*, jclass, jlong handle, jint state, jint receivedFrames, jint releasedFrames,
+    jint lastJpegBytes, jlong firstTimestampMs, jlong lastTimestampMs) {
+    DisplayProbe* probe = from(handle);
+    if (!probe)
+        return;
+    probe->worker.updateSequenceMetrics(state, receivedFrames, releasedFrames, lastJpegBytes,
+                                        firstTimestampMs, lastTimestampMs);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_io_pihda_retrolens_NativeBridge_nativeClearDisplayProbe(JNIEnv*, jclass, jlong handle) {
     (void)from(handle);
 }
